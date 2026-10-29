@@ -1,0 +1,49 @@
+# specster-cli
+
+[Specster](https://specster.fr) from the command line, for a terminal or an agent such as Claude Code: link a folder to a Project, then read and add to a User Story's Interview and Spec Versions. A single file with no dependencies, for Node.js 20 or later.
+
+## Run it
+
+No install: npx fetches it from this repo.
+
+```sh
+npx github:sebastienpalanicaouden/specster-cli <command>
+```
+
+To type `specster` instead, add an alias to your shell's profile:
+
+```sh
+alias specster="npx --yes github:sebastienpalanicaouden/specster-cli"
+```
+
+## Sign in
+
+Create a Personal Token in Specster, « Mon compte », « Jetons personnels », one per computer, and give it in `SPECSTER_TOKEN`, for instance in your shell's profile. Never commit it: whoever has it can read and change your Projects until you delete it.
+
+```sh
+export SPECSTER_TOKEN=specster_…
+```
+
+## Commands
+
+```sh
+specster init <project URL>        # links this folder to the Project, in .specster.json
+specster interview add US-n        # adds the standard input, word for word, to the User Story's Interview
+specster spec-version add US-n     # adds the standard input, HTML, as the User Story's next Spec Version
+specster load US-n [vN]            # prints the User Story, its Interview and a Spec Version, the Current one by default
+```
+
+`init` takes the Project's address as your browser shows it, such as `https://specster.fr/projets/<id>`, and writes `.specster.json` in the current folder. The other commands then find it in that folder or the nearest one above, as git does, so `US-2` is enough. They also take a User Story's address instead, such as `https://specster.fr/projets/<id>/us/2`, which needs no linked folder.
+
+`interview add` and `spec-version add` read the standard input, for instance from a heredoc, so nothing needs to be saved to a file:
+
+```sh
+specster interview add US-2 <<'EOF'
+Question : quel bouton ?
+Réponse : « Copier », après la phrase.
+EOF
+```
+
+`load` prints Markdown: the User Story's sentence, each Interview Entry with its date, then the Spec Version's HTML.
+
+Errors, such as a missing token, a folder linked to no Project or Specster's own refusals, are printed on the standard error, in French, and the command exits with 1.

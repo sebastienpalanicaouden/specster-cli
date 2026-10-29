@@ -1,0 +1,17 @@
+{
+  "name": "specster-cli",
+  "version": "0.1.0",
+  "description": "Specster from the command line: a User Story's Interview and Spec Versions, for a terminal or an agent.",
+  "type": "module",
+  "bin": {
+    "specster": "specster.mjs"
+  },
+  "files": [
+    "specster.mjs",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}
