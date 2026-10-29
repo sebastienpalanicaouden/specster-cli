@@ -1,0 +1,13 @@
+{
+  "name": "specster",
+  "version": "0.1.0",
+  "description": "Keep a feature's design context in Specster: save a grilling as a User Story's Interview, write its meta-spec as a Spec Version, load both back in another session.",
+  "author": {
+    "name": "Sébastien Palanicaouden"
+  },
+  "homepage": "https://specster.fr",
+  "repository": "https://github.com/sebastienpalanicaouden/specster-cli",
+  "license": "MIT",
+  "keywords": ["specster", "spec", "user-story", "grilling"],
+  "skills": ["./skills/interview", "./skills/meta-spec", "./skills/load"]
+}

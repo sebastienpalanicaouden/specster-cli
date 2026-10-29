@@ -48,3 +48,19 @@ EOF
 `load` prints Markdown: the User Story's sentence, each Interview Entry with its date, then the Spec Version's HTML.
 
 Errors, such as a missing token, a folder linked to no Project or Specster's own refusals, are printed on the standard error, in French, and the command exits with 1.
+
+## Claude Code plugin
+
+This repo is also a Claude Code plugin, `specster`, which runs the CLI for you. Install it in Claude Code:
+
+```
+/plugin install specster --marketplace sebastienpalanicaouden/specster-cli
+```
+
+It adds three commands, each run by hand:
+
+- `/specster:interview US-n`, at the end of a grilling: saves its questions and answers, word for word, as the next Entry of the User Story's Interview.
+- `/specster:meta-spec US-n ["change request"]`: writes the User Story's meta-spec, a functional spec holding a mockup, from its Interview; or, given a sentence, its next version, changed only where the request reaches. You try the draft in your browser, and it is added to Specster as a Spec Version once you approve it.
+- `/specster:load US-n [vN]`: loads the User Story, its Interview and a Spec Version, the Current one by default, into the conversation, before `/to-spec` or `/implement` for instance.
+
+They need the same `SPECSTER_TOKEN`, and a folder linked with `specster init` for `US-n`.

@@ -1,0 +1,16 @@
+{
+  "name": "specster",
+  "owner": {
+    "name": "Sébastien Palanicaouden"
+  },
+  "description": "Specster's Claude Code plugin, from the specster-cli repo.",
+  "plugins": [
+    {
+      "name": "specster",
+      "source": "./",
+      "description": "Save a grilling as a User Story's Interview, write its meta-spec as a Spec Version, load both back.",
+      "category": "productivity",
+      "keywords": ["specster", "spec", "user-story"]
+    }
+  ]
+}
