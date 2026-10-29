@@ -64,3 +64,19 @@ It adds three commands, each run by hand:
 - `/specster:load US-n [vN]`: loads the User Story, its Interview and a Spec Version, the Current one by default, into the conversation, before `/to-spec` or `/implement` for instance.
 
 They need the same `SPECSTER_TOKEN`, and a folder linked with `specster init` for `US-n`.
+
+## Link a repo
+
+In each repo whose features you keep in Specster:
+
+1. Run `specster init <project URL>` at its root, and commit `.specster.json`. It holds no secret, and every computer then knows the Project.
+2. Add these lines to its `CLAUDE.md`, so that specs and tickets name the meta-spec they come from, and `/implement` loads it (the plugin's commands are run by hand, so the agent runs the CLI itself):
+
+   ```md
+   ### Meta-specs
+
+   A meta-spec is the Spec Version, in Specster, that specifies a User Story: a functional spec holding a mockup. This repo is linked to its Specster Project by `.specster.json`, so `US-n` names a User Story there.
+
+   - A spec or ticket written from a meta-spec opens with « Meta-spec : US-n vN. Elle fait foi pour l'apparence et le comportement, sauf les exceptions écrites ici ; ses commandes de démonstration ne font pas partie de la feature. », naming the exact version, and lists those exceptions. Each ticket repeats the line, for `/implement` reads the ticket alone.
+   - Before implementing a ticket that cites a meta-spec, load that version: `specster load US-n vN`, or `npx --yes github:sebastienpalanicaouden/specster-cli load US-n vN` where `specster` isn't installed. It needs the User's Personal Token in `SPECSTER_TOKEN`; without it, ask the User to set it rather than working from the ticket alone.
+   ```
