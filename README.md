@@ -4,16 +4,17 @@
 
 ## Run it
 
-No install: npx fetches it from this repo.
+With no install, npx fetches it from this repo. Each command then takes a few seconds, as npm checks this repo for a newer version every time:
 
 ```sh
 npx github:sebastienpalanicaouden/specster-cli <command>
 ```
 
-To type `specster` instead, add an alias to your shell's profile:
+Installed once, `specster` answers at once; run the same command again to update it:
 
 ```sh
-alias specster="npx --yes github:sebastienpalanicaouden/specster-cli"
+npm install --global github:sebastienpalanicaouden/specster-cli
+specster <command>
 ```
 
 ## Sign in
