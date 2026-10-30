@@ -1,7 +1,7 @@
 {
   "name": "specster-cli",
-  "version": "0.1.0",
-  "description": "Specster from the command line: a User Story's Interview and Spec Versions, for a terminal or an agent.",
+  "version": "0.2.0",
+  "description": "Specster from the command line: a User Story's Interview, Spec Versions and Notes, and its archiving, for a terminal or an agent.",
   "type": "module",
   "bin": {
     "specster": "specster.mjs"
