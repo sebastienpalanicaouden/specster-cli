@@ -1,6 +1,6 @@
 # specster-cli
 
-[Specster](https://specster.fr) from the command line, for a terminal or an agent such as Claude Code: link a folder to a Project, then read and add to a User Story's Interview and Spec Versions, write its Notes and archive it. A single file with no dependencies, for Node.js 20 or later.
+[Specster](https://specster.fr) from the command line, for a terminal or an agent such as Claude Code: link a folder to a Project, then read and add to a User Story's Interview and Spec Versions, write its Notes, give it the Project's Labels and archive it. A single file with no dependencies, for Node.js 20 or later.
 
 ## Run it
 
@@ -59,6 +59,9 @@ specster spec-version add US-n     # adds the standard input, HTML, as the User 
 specster note add US-n             # adds the standard input, word for word, as the User Story's next Note
 specster note edit US-n <N>        # replaces the text of Note N with the standard input
 specster note list US-n            # prints the User Story's Notes, oldest first
+specster label list                # prints the Project's Labels, each with its color
+specster label add US-n <name>…    # gives the User Story Labels of its Project
+specster label remove US-n <name>… # takes Labels off the User Story
 specster archive US-n              # archives the User Story
 specster unarchive US-n            # unarchives it
 specster load US-n [vN]            # prints the User Story, its Interview and a Spec Version, the Current one by default
@@ -75,9 +78,11 @@ Réponse : « Copier », après la phrase.
 EOF
 ```
 
-`load` prints Markdown: the User Story's sentence, when it was archived if it is, each Interview Entry with its date, then the Spec Version's HTML. It leaves out the Notes, which `note list` prints, each under « ### Note 2 · ajoutée le … (modifiée le …) ». A Note is named by its number, as its User Story's page shows it; deleting one is done on that page. `archive` and `unarchive` may run again without risk: they then say the User Story already was as asked.
+`load` prints Markdown: the User Story's sentence, when it was archived if it is, « Labels : À relire, bug » if it has any, each Interview Entry with its date, then the Spec Version's HTML. It leaves out the Notes, which `note list` prints, each under « ### Note 2 · ajoutée le … (modifiée le …) ». A Note is named by its number, as its User Story's page shows it; deleting one is done on that page. `archive` and `unarchive` may run again without risk: they then say the User Story already was as asked.
 
-An Archived User Story is read-only but for its Notes: `interview add` and `spec-version add` print Specster's refusal.
+`label list` prints a line for each Label of the linked Project, such as « merged · vert », in alphabetical order. `label add` and `label remove` take one name or more, a name with spaces between quotes, such as `specster label add US-5 bug "À relire"`, recognized whatever their case, and print a line for each Label. They may run again without risk: they then say the User Story already was as asked. A name the Project doesn't have refuses them all and changes nothing, and the message lists the Project's Labels. The CLI creates, renames, recolors and deletes no Label: that is done in Specster, on the Project's « Labels » page.
+
+An Archived User Story is read-only but for its Notes and Labels: `interview add` and `spec-version add` print Specster's refusal.
 
 Errors, such as a missing token, a folder linked to no Project or Specster's own refusals, are printed on the standard error, in French, and the command exits with 1.
 
@@ -102,7 +107,7 @@ They need the same `SPECSTER_TOKEN`, and a folder linked with `specster init` fo
 In each repo whose features you keep in Specster:
 
 1. Run `specster init <project URL>` at its root, and commit `.specster.json`. It holds no secret, and every computer then knows the Project.
-2. Add these lines to its `CLAUDE.md`, so that specs and tickets name the meta-spec they come from, `/implement` loads it, and the agent archives a User Story once a merge finishes it, with a Note on what delivered it (the plugin's commands are run by hand, so the agent runs the CLI itself):
+2. Add these lines to its `CLAUDE.md`, so that specs and tickets name the meta-spec they come from, `/implement` loads it, and the agent archives a User Story once a merge finishes it, with a Note on what delivered it and the « merged » Label (the plugin's commands are run by hand, so the agent runs the CLI itself):
 
    ````md
    ### Meta-specs
@@ -111,7 +116,7 @@ In each repo whose features you keep in Specster:
 
    - A spec or ticket written from a meta-spec opens with « Meta-spec : US-n vN. Elle fait foi pour l'apparence et le comportement, sauf les exceptions écrites ici ; ses commandes de démonstration ne font pas partie de la feature. », naming the exact version, and lists those exceptions. Each ticket repeats the line, for `/implement` reads the ticket alone.
    - Before implementing a ticket that cites a meta-spec, load that version: `specster load US-n vN`, or `npx --yes github:sebastienpalanicaouden/specster-cli load US-n vN` where `specster` isn't installed. It needs the User's Personal Token in `SPECSTER_TOKEN`; without it, ask the User to set it rather than working from the ticket alone.
-   - After merging a PR, archive each User Story it delivers, without waiting for the deploy tag. The tickets the PR closed name their User Stories (« Meta-spec : US-n vN »). A User Story is delivered once its spec and every ticket citing « Meta-spec : US-n » are closed (check each citation is US-n itself, not US-n0); while one of them is open, it stays in progress. For each one delivered, add its delivery Note, archive it, and tell the User in one line: `specster note add US-n` with the Note on its standard input, then `specster archive US-n`, through `npx` and with `SPECSTER_TOKEN` as above. The Note, in French, on this model:
+   - After merging a PR, archive each User Story it delivers, without waiting for the deploy tag. The tickets the PR closed name their User Stories (« Meta-spec : US-n vN »). A User Story is delivered once its spec and every ticket citing « Meta-spec : US-n » are closed (check each citation is US-n itself, not US-n0); while one of them is open, it stays in progress. For each one delivered, add its delivery Note, give it the « merged » Label, archive it, and tell the User in one line: `specster note add US-n` with the Note on its standard input, then `specster label add US-n merged`, then `specster archive US-n`, through `npx` and with `SPECSTER_TOKEN` as above. If the Label can't be given, for instance because the Project has no « merged » Label, archive it all the same and say so in that line. Give no other Label unless the User asks. The Note, in French, on this model:
 
      ```
      Livrée par la PR #38 (https://github.com/…/pull/38), squash-mergée en 64e5d07, d'après la meta-spec US-12 v1.
