@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Specster from the command line, for a terminal or an agent: links a folder to a Project, then reads and adds to a
-// User Story's Interview and Spec Versions, writes its Notes and archives it, through Specster's API, with the User's
-// Personal Token.
+// User Story's Interview and Spec Versions, writes its Notes, gives it the Project's Labels and archives it, through
+// Specster's API, with the User's Personal Token.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -16,6 +16,9 @@ const USAGE = `Usage :
   specster note add <US-n>            ajoute l'entrée standard comme note de la User Story
   specster note edit <US-n> <N>       remplace le texte de la note N par l'entrée standard
   specster note list <US-n>           affiche les notes de la User Story
+  specster label list                 affiche les Labels du projet, avec leur couleur
+  specster label add <US-n> <nom>…    pose des Labels du projet sur la User Story
+  specster label remove <US-n> <nom>… retire des Labels de la User Story
   specster archive <US-n>             archive la User Story
   specster unarchive <US-n>           désarchive la User Story
   specster load <US-n> [vN]           affiche la User Story, son interview et une version de spec,
@@ -27,6 +30,18 @@ Le jeton personnel, créé dans « Mon compte », se donne dans la variable SPEC
 // As Specster's pages show them, such as « 29 octobre 2026 à 15:51 », in Paris time.
 const DATE_FORMAT = new Intl.DateTimeFormat("fr-FR", { dateStyle: "long", timeStyle: "short", timeZone: "Europe/Paris" });
 
+// The colors of Labels, in French. A key missing here, from a Specster newer than the CLI, is shown as it is.
+const COLOR_NAMES = new Map([
+  ["gray", "gris"],
+  ["red", "rouge"],
+  ["orange", "orange"],
+  ["yellow", "jaune"],
+  ["green", "vert"],
+  ["blue", "bleu"],
+  ["purple", "violet"],
+  ["pink", "rose"],
+]);
+
 // A message for the User, printed as it is, without a stack trace.
 class UserError extends Error {}
 
@@ -37,6 +52,9 @@ const COMMANDS = {
   "note add": addNote,
   "note edit": editNote,
   "note list": listNotes,
+  "label list": listLabels,
+  "label add": addLabels,
+  "label remove": removeLabels,
   archive,
   unarchive,
   load,
@@ -112,6 +130,43 @@ async function listNotes([reference]) {
   console.log(listed.join("\n\n"));
 }
 
+// The linked Project's Labels, in alphabetical order, each with its color.
+async function listLabels() {
+  const { url, project } = linkedProject();
+  const { labels } = await api(url, `/api/projets/${project}/labels`);
+  if (labels.length === 0) {
+    console.log("Ce projet n'a pas encore de Label.");
+    return;
+  }
+  console.log(labels.map(({ name, color }) => `${name} · ${COLOR_NAMES.get(color) ?? color}`).join("\n"));
+}
+
+// Gives the User Story the Project's Labels the User names. Asking again changes nothing.
+async function addLabels(args) {
+  await changeLabels("add", args, (userStoryName, name, changed) =>
+    changed ? `Label « ${name} » ajouté à ${userStoryName}.` : `${userStoryName} avait déjà le Label « ${name} ».`,
+  );
+}
+
+// Takes the named Labels off the User Story. Asking again changes nothing.
+async function removeLabels(args) {
+  await changeLabels("remove", args, (userStoryName, name, changed) =>
+    changed ? `Label « ${name} » retiré de ${userStoryName}.` : `${userStoryName} n'avait pas le Label « ${name} ».`,
+  );
+}
+
+// One request for all the names, so that an unknown one changes nothing for the others. One line for each Label.
+async function changeLabels(change, [reference, ...names], lineFor) {
+  const userStory = userStoryAt(reference);
+  if (names.length === 0) throw new UserError(`Donnez au moins un nom de Label, comme merged.\n\n${USAGE}`);
+  const { labels } = await api(userStory.url, `${userStory.path}/labels`, {
+    method: "PATCH",
+    body: JSON.stringify({ [change]: names }),
+    contentType: "application/json",
+  });
+  console.log(labels.map(({ name, changed }) => lineFor(userStory.name, name, changed)).join("\n"));
+}
+
 // Archives the User Story. A program may ask again: an Archived User Story stays as it is.
 async function archive([reference]) {
   const userStory = userStoryAt(reference);
@@ -126,13 +181,13 @@ async function unarchive([reference]) {
   console.log(changed ? `${userStory.name} désarchivée.` : `${userStory.name} n'était pas archivée.`);
 }
 
-// The User Story, its Interview and one of its Spec Versions, the Current Spec Version unless told otherwise, and
-// when it was archived if it is. Never its Notes, which note list prints.
+// The User Story, its Interview and one of its Spec Versions, the Current Spec Version unless told otherwise, when it
+// was archived if it is, and its Labels if it has any. Never its Notes, which note list prints.
 async function load([reference, version]) {
   const userStory = userStoryAt(reference);
   const asked = version === undefined ? null : /^v?([1-9][0-9]*)$/i.exec(version)?.[1];
   if (asked === undefined) throw new UserError(`Désignez la version de spec par vN, comme v2.\n\n${USAGE}`);
-  const { number, sentence, currentSpecVersion, archivedAt } = await api(userStory.url, userStory.path);
+  const { number, sentence, currentSpecVersion, archivedAt, labels } = await api(userStory.url, userStory.path);
   const { entries } = await api(userStory.url, `${userStory.path}/interview`);
   const interview =
     entries.length === 0
@@ -148,7 +203,11 @@ async function load([reference, version]) {
         ];
   // Null while in progress, missing from a Specster that has no archiving yet.
   const archived = archivedAt ? [`Archivée le ${DATE_FORMAT.format(new Date(archivedAt))}`] : [];
-  console.log([`# US-${number} · ${sentence}`, ...archived, "## Interview", ...interview, ...specVersion].join("\n\n"));
+  // Missing from a Specster that has no Labels yet.
+  const labelled = labels?.length > 0 ? [`Labels : ${labels.join(", ")}`] : [];
+  console.log(
+    [`# US-${number} · ${sentence}`, ...archived, ...labelled, "## Interview", ...interview, ...specVersion].join("\n\n"),
+  );
 }
 
 // Where the API keeps the User Story the User names, as US-n in a linked folder or by its address.
