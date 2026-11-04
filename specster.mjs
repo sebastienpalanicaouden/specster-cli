@@ -148,9 +148,10 @@ async function removeFromRelease([reference, ...references]) {
   await changeGroup(release, "remove", userStoryNumbers(references));
 }
 
-// Sends the change, and says what it did to each User Story, in the order the User named them.
+// Sends the change, and says what it did to each User Story, in the order the User named them, then the warning, if the
+// group now differs from what the Current Spec Version covers.
 async function changeGroup(release, change, numbers) {
-  const { userStories } = await api(release.url, `${release.path}/user-stories`, {
+  const { userStories, groupChange } = await api(release.url, `${release.path}/user-stories`, {
     method: "PATCH",
     body: JSON.stringify({ [change]: numbers }),
     contentType: "application/json",
@@ -160,6 +161,7 @@ async function changeGroup(release, change, numbers) {
       ? (name, changed) => (changed ? `${name} ajoutée à ${release.name}.` : `${name} était déjà dans ${release.name}.`)
       : (name, changed) => (changed ? `${name} retirée de ${release.name}.` : `${name} n'était pas dans ${release.name}.`);
   console.log(userStories.map(({ number, changed }) => said(`US-${number}`, changed)).join("\n"));
+  if (groupChange) console.log(groupChange);
 }
 
 // Gives the Release the Tag the User writes, as a single argument, so that no part of it goes missing, or takes it off
@@ -332,17 +334,17 @@ async function load([reference, version]) {
   console.log(namesRelease(reference) ? await loadedRelease(target, shown) : await loadedUserStory(target, shown));
 }
 
-// The Release as `load` prints it, with the Spec Version asked for, or the Current Spec Version. The Notes it shows are
-// those of its User Stories: its own are for note list.
+// The Release as `load` prints it, with the Spec Version asked for, or the Current Spec Version, then the warning, if the
+// group differs from what the Current Spec Version covers. The Notes it shows are those of its User Stories: its own are
+// for note list.
 async function loadedRelease(release, asked) {
-  const { number, title, tag, archivedAt, labels, userStories, currentSpecVersion, specVersions } = await api(
+  const { number, title, tag, archivedAt, labels, userStories, currentSpecVersion, specVersions, groupChange } = await api(
     release.url,
     release.path,
   );
   const shown = asked ?? currentSpecVersion;
-  if (shown !== null && !specVersions.some((specVersion) => specVersion.number === shown)) {
-    throw new UserError(`${release.name} n'a pas de v${shown}.`);
-  }
+  const covered = specVersions.find((specVersion) => specVersion.number === shown)?.covers;
+  if (shown !== null && !covered) throw new UserError(`${release.name} n'a pas de v${shown}.`);
   const { entries } = await api(release.url, `${release.path}/interview`);
   const group =
     userStories.length === 0
@@ -362,7 +364,9 @@ async function loadedRelease(release, asked) {
     shown === null
       ? ["## Version de spec", "Cette Release n'a pas encore de version de spec."]
       : [
-          `## Version de spec v${shown}${shown === currentSpecVersion ? " (Version courante)" : ""}`,
+          `## Version de spec v${shown} (${shown === currentSpecVersion ? "Version courante, " : ""}couvre ${covered
+            .map((userStory) => `US-${userStory}`)
+            .join(", ")})`,
           await api(release.url, `${release.path}/v/${shown}`, { as: "text" }),
         ];
   return [
@@ -375,6 +379,7 @@ async function loadedRelease(release, asked) {
     "## Interview",
     ...interview,
     ...specVersion,
+    ...(groupChange ? [groupChange] : []),
   ].join("\n\n");
 }
 
