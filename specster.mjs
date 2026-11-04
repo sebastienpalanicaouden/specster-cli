@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Specster from the command line, for a terminal or an agent: links a folder to a Project, then reads and adds to a
-// User Story's Interview and Spec Versions, writes its Notes, gives it the Project's Labels and archives it, through
-// Specster's API, with the User's Personal Token.
+// Specster from the command line, for a terminal or an agent: links a folder to a Project, then lists and creates its
+// Releases, reads and adds to a User Story's Interview and Spec Versions, writes its Notes, gives it the Project's
+// Labels and archives it, through Specster's API, with the User's Personal Token.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -11,6 +11,8 @@ const CONFIG_FILE = ".specster.json";
 
 const USAGE = `Usage :
   specster init <adresse du projet>   relie ce dossier au projet
+  specster release list               affiche les Releases du projet, la plus récente d'abord
+  specster release create "<titre>"   crée une Release dans le projet
   specster interview add <US-n>       ajoute l'entrée standard à l'interview de la User Story
   specster spec-version add <US-n>    ajoute l'entrée standard, du HTML, comme version de spec
   specster note add <US-n>            ajoute l'entrée standard comme note de la User Story
@@ -23,8 +25,10 @@ const USAGE = `Usage :
   specster unarchive <US-n>           désarchive la User Story
   specster load <US-n> [vN]           affiche la User Story, son interview et une version de spec,
                                       la version courante si vN n'est pas donnée
+  specster load <R-n>                 affiche la Release
 
 Une User Story se désigne par US-n dans un dossier relié, ou par son adresse.
+Une Release se désigne par R-n dans un dossier relié, ou par son adresse.
 Le jeton personnel, créé dans « Mon compte », se donne dans la variable SPECSTER_TOKEN.`;
 
 // As Specster's pages show them, such as « 29 octobre 2026 à 15:51 », in Paris time.
@@ -47,6 +51,8 @@ class UserError extends Error {}
 
 const COMMANDS = {
   init,
+  "release list": listReleases,
+  "release create": createRelease,
   "interview add": addInterviewEntry,
   "spec-version add": addSpecVersion,
   "note add": addNote,
@@ -79,6 +85,28 @@ async function init([address]) {
   const [, url, project] = match;
   writeFileSync(CONFIG_FILE, `${JSON.stringify({ url, project }, null, 2)}\n`);
   console.log(`Ce dossier est relié au projet ${project} de ${url}.`);
+}
+
+// The linked Project's Releases, the most recent first, one line each.
+async function listReleases() {
+  const { url, project } = linkedProject();
+  const { releases } = await api(url, `/api/projets/${project}/releases`);
+  if (releases.length === 0) {
+    console.log("Ce projet n'a pas encore de Release.");
+    return;
+  }
+  console.log(releases.map(({ number, title }) => `R-${number} · ${title} · aucune User Story`).join("\n"));
+}
+
+// Creates a Release in the linked Project. Without a title, Specster's refusal says to write one.
+async function createRelease([title = ""]) {
+  const { url, project } = linkedProject();
+  const created = await api(url, `/api/projets/${project}/releases`, {
+    method: "POST",
+    body: JSON.stringify({ title }),
+    contentType: "application/json",
+  });
+  console.log(`R-${created.number} créée : « ${created.title} ».`);
 }
 
 // Adds what comes on the standard input, word for word, as the next Entry of the User Story's Interview.
@@ -184,6 +212,7 @@ async function unarchive([reference]) {
 // The User Story, its Interview and one of its Spec Versions, the Current Spec Version unless told otherwise, when it
 // was archived if it is, and its Labels if it has any. Never its Notes, which note list prints.
 async function load([reference, version]) {
+  if (namesRelease(reference)) return loadRelease(reference);
   const userStory = userStoryAt(reference);
   const asked = version === undefined ? null : /^v?([1-9][0-9]*)$/i.exec(version)?.[1];
   if (asked === undefined) throw new UserError(`Désignez la version de spec par vN, comme v2.\n\n${USAGE}`);
@@ -208,6 +237,31 @@ async function load([reference, version]) {
   console.log(
     [`# US-${number} · ${sentence}`, ...archived, ...labelled, "## Interview", ...interview, ...specVersion].join("\n\n"),
   );
+}
+
+// The Release's number and title.
+async function loadRelease(reference) {
+  const release = releaseAt(reference);
+  const { number, title } = await api(release.url, release.path);
+  console.log(`# R-${number} · ${title}`);
+}
+
+// Where the API keeps the Release the User names, as R-n in a linked folder or by its address.
+function releaseAt(reference) {
+  const byAddress = /^(https?:\/\/[^/]+)\/projets\/([0-9a-f-]{36})\/releases\/([1-9][0-9]*)\/?$/i.exec(reference ?? "");
+  if (byAddress) {
+    const [, url, project, number] = byAddress;
+    return { name: `R-${number}`, url, path: `/api/projets/${project}/releases/${number}` };
+  }
+  const byNumber = /^R-([1-9][0-9]*)$/i.exec(reference ?? "");
+  if (!byNumber) throw new UserError(`Désignez la Release par R-n ou par son adresse.\n\n${USAGE}`);
+  const { url, project } = linkedProject();
+  return { name: `R-${byNumber[1]}`, url, path: `/api/projets/${project}/releases/${byNumber[1]}` };
+}
+
+// Whether a command that takes either means a Release rather than a User Story, even written wrong, such as R-01.
+function namesRelease(reference) {
+  return /^R-|\/releases\//i.test(reference ?? "");
 }
 
 // Where the API keeps the User Story the User names, as US-n in a linked folder or by its address.
