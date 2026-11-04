@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Specster from the command line, for a terminal or an agent: links a folder to a Project, then lists and creates its
 // Releases, changes their groups and Tags, writes their Notes and archives them, reads and adds to a User Story's
-// Interview and Spec Versions, writes its Notes, gives it the Project's Labels and archives it, through Specster's API,
-// with the User's Personal Token.
+// Interview and Spec Versions, writes its Notes, gives it its Labels and archives it, through Specster's API, with the
+// User's Personal Token.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -26,9 +26,11 @@ const USAGE = `Usage :
   specster note add <US-n|R-n>        ajoute l'entrée standard comme note de la User Story ou de la Release
   specster note edit <US-n|R-n> <N>   remplace le texte de la note N par l'entrée standard
   specster note list <US-n|R-n>       affiche les notes de la User Story ou de la Release
-  specster label list                 affiche les Labels du projet, avec leur couleur
-  specster label add <US-n> <nom>…    pose des Labels du projet sur la User Story
-  specster label remove <US-n> <nom>… retire des Labels de la User Story
+  specster label list                 affiche les Labels des User Stories et ceux des Releases, avec leur couleur
+  specster label add <US-n|R-n> <nom>…
+                                      pose des Labels de sa liste sur la User Story ou la Release
+  specster label remove <US-n|R-n> <nom>…
+                                      retire des Labels de la User Story ou de la Release
   specster archive <US-n>             archive la User Story, si elle n'est dans aucune Release
   specster unarchive <US-n>           désarchive la User Story, si elle n'est dans aucune Release
   specster load <US-n> [vN]           affiche la User Story, son interview et une version de spec,
@@ -110,11 +112,12 @@ async function listReleases() {
   }
   console.log(
     releases
-      .map(({ number, title, tag, archivedAt, userStories }) => {
+      .map(({ number, title, tag, archivedAt, userStories, labels }) => {
         const group = userStories.map((userStory) => `US-${userStory}`).join(", ") || "aucune User Story";
         const archived = archivedAt ? ["archivée"] : [];
         const tagged = tag ? [`tag ${tag}`] : [];
-        return [`R-${number}`, title, ...archived, ...tagged, group].join(" · ");
+        const labelled = labels.length > 0 ? [labels.join(", ")] : [];
+        return [`R-${number}`, title, ...archived, ...tagged, group, ...labelled].join(" · ");
       })
       .join("\n"),
   );
@@ -258,41 +261,49 @@ async function listNotes([reference]) {
   console.log(listed.join("\n\n"));
 }
 
-// The linked Project's Labels, in alphabetical order, each with its color.
+// The linked Project's two lists of Labels, apart, each in alphabetical order, with their colors.
 async function listLabels() {
   const { url, project } = linkedProject();
-  const { labels } = await api(url, `/api/projets/${project}/labels`);
-  if (labels.length === 0) {
-    console.log("Ce projet n'a pas encore de Label.");
-    return;
-  }
-  console.log(labels.map(({ name, color }) => `${name} · ${COLOR_NAMES.get(color) ?? color}`).join("\n"));
-}
-
-// Gives the User Story the Project's Labels the User names. Asking again changes nothing.
-async function addLabels(args) {
-  await changeLabels("add", args, (userStoryName, name, changed) =>
-    changed ? `Label « ${name} » ajouté à ${userStoryName}.` : `${userStoryName} avait déjà le Label « ${name} ».`,
+  const [ofUserStories, ofReleases] = await Promise.all([
+    api(url, `/api/projets/${project}/labels`),
+    api(url, `/api/projets/${project}/releases/labels`),
+  ]);
+  const lines = (labels) =>
+    labels.length > 0 ? labels.map(({ name, color }) => `${name} · ${COLOR_NAMES.get(color) ?? color}`) : ["Aucun Label."];
+  console.log(
+    [
+      "Labels des User Stories :",
+      ...lines(ofUserStories.labels),
+      "Labels des Releases :",
+      ...lines(ofReleases.labels),
+    ].join("\n"),
   );
 }
 
-// Takes the named Labels off the User Story. Asking again changes nothing.
+// Gives the User Story or the Release the Labels of its list the User names. Asking again changes nothing.
+async function addLabels(args) {
+  await changeLabels("add", args, (targetName, name, changed) =>
+    changed ? `Label « ${name} » ajouté à ${targetName}.` : `${targetName} avait déjà le Label « ${name} ».`,
+  );
+}
+
+// Takes the named Labels off the User Story or the Release. Asking again changes nothing.
 async function removeLabels(args) {
-  await changeLabels("remove", args, (userStoryName, name, changed) =>
-    changed ? `Label « ${name} » retiré de ${userStoryName}.` : `${userStoryName} n'avait pas le Label « ${name} ».`,
+  await changeLabels("remove", args, (targetName, name, changed) =>
+    changed ? `Label « ${name} » retiré de ${targetName}.` : `${targetName} n'avait pas le Label « ${name} ».`,
   );
 }
 
 // One request for all the names, so that an unknown one changes nothing for the others. One line for each Label.
 async function changeLabels(change, [reference, ...names], lineFor) {
-  const userStory = userStoryAt(reference);
+  const target = userStoryOrReleaseAt(reference);
   if (names.length === 0) throw new UserError(`Donnez au moins un nom de Label, comme merged.\n\n${USAGE}`);
-  const { labels } = await api(userStory.url, `${userStory.path}/labels`, {
+  const { labels } = await api(target.url, `${target.path}/labels`, {
     method: "PATCH",
     body: JSON.stringify({ [change]: names }),
     contentType: "application/json",
   });
-  console.log(labels.map(({ name, changed }) => lineFor(userStory.name, name, changed)).join("\n"));
+  console.log(labels.map(({ name, changed }) => lineFor(target.name, name, changed)).join("\n"));
 }
 
 // Archives the User Story. A program may ask again: an Archived User Story stays as it is.
