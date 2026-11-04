@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Specster from the command line, for a terminal or an agent: links a folder to a Project, then lists and creates its
-// Releases, changes their groups and archives them, reads and adds to a User Story's Interview and Spec Versions, writes
-// its Notes, gives it the Project's Labels and archives it, through Specster's API, with the User's Personal Token.
+// Releases, changes their groups and Tags and archives them, reads and adds to a User Story's Interview and Spec
+// Versions, writes its Notes, gives it the Project's Labels and archives it, through Specster's API, with the User's
+// Personal Token.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -17,6 +18,7 @@ const USAGE = `Usage :
   specster release add <R-n> <US-n>…  ajoute des User Stories à la Release
   specster release remove <R-n> <US-n>…
                                       retire des User Stories de la Release, sans les supprimer
+  specster release tag <R-n> <texte>  pose le tag de la Release, un texte vide le retire
   specster release archive <R-n>      archive la Release, avec ses User Stories
   specster release unarchive <R-n>    désarchive la Release, avec ses User Stories
   specster interview add <US-n>       ajoute l'entrée standard à l'interview de la User Story
@@ -61,6 +63,7 @@ const COMMANDS = {
   "release create": createRelease,
   "release add": addToRelease,
   "release remove": removeFromRelease,
+  "release tag": tagRelease,
   "release archive": archiveRelease,
   "release unarchive": unarchiveRelease,
   "interview add": addInterviewEntry,
@@ -107,9 +110,11 @@ async function listReleases() {
   }
   console.log(
     releases
-      .map(({ number, title, archivedAt, userStories }) => {
+      .map(({ number, title, tag, archivedAt, userStories }) => {
         const group = userStories.map((userStory) => `US-${userStory}`).join(", ") || "aucune User Story";
-        return [`R-${number}`, title, ...(archivedAt ? ["archivée"] : []), group].join(" · ");
+        const archived = archivedAt ? ["archivée"] : [];
+        const tagged = tag ? [`tag ${tag}`] : [];
+        return [`R-${number}`, title, ...archived, ...tagged, group].join(" · ");
       })
       .join("\n"),
   );
@@ -152,6 +157,21 @@ async function changeGroup(release, change, numbers) {
       ? (name, changed) => (changed ? `${name} ajoutée à ${release.name}.` : `${name} était déjà dans ${release.name}.`)
       : (name, changed) => (changed ? `${name} retirée de ${release.name}.` : `${name} n'était pas dans ${release.name}.`);
   console.log(userStories.map(({ number, changed }) => said(`US-${number}`, changed)).join("\n"));
+}
+
+// Gives the Release the Tag the User writes, as a single argument, so that no part of it goes missing, or takes it off
+// with an empty one. Asking again changes nothing.
+async function tagRelease([reference, text, ...others]) {
+  const release = releaseAt(reference);
+  if (text === undefined || others.length > 0) {
+    throw new UserError(`Donnez le texte du tag, comme v1.9.0, ou "" pour le retirer.\n\n${USAGE}`);
+  }
+  const { tag } = await api(release.url, `${release.path}/tag`, {
+    method: "PUT",
+    body: text,
+    contentType: "text/plain; charset=utf-8",
+  });
+  console.log(tag === null ? `Tag de ${release.name} retiré.` : `Tag de ${release.name} : ${tag}.`);
 }
 
 // Archives the Release with its User Stories. A program may ask again: an Archived Release stays as it is.
