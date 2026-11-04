@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Specster from the command line, for a terminal or an agent: links a folder to a Project, then lists and creates its
-// Releases, reads and adds to a User Story's Interview and Spec Versions, writes its Notes, gives it the Project's
-// Labels and archives it, through Specster's API, with the User's Personal Token.
+// Releases and changes their groups, reads and adds to a User Story's Interview and Spec Versions, writes its Notes,
+// gives it the Project's Labels and archives it, through Specster's API, with the User's Personal Token.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -12,7 +12,11 @@ const CONFIG_FILE = ".specster.json";
 const USAGE = `Usage :
   specster init <adresse du projet>   relie ce dossier au projet
   specster release list               affiche les Releases du projet, la plus récente d'abord
-  specster release create "<titre>"   crée une Release dans le projet
+  specster release create "<titre>" [US-n…]
+                                      crée une Release dans le projet, et y ajoute les User Stories
+  specster release add <R-n> <US-n>…  ajoute des User Stories à la Release
+  specster release remove <R-n> <US-n>…
+                                      retire des User Stories de la Release, sans les supprimer
   specster interview add <US-n>       ajoute l'entrée standard à l'interview de la User Story
   specster spec-version add <US-n>    ajoute l'entrée standard, du HTML, comme version de spec
   specster note add <US-n>            ajoute l'entrée standard comme note de la User Story
@@ -53,6 +57,8 @@ const COMMANDS = {
   init,
   "release list": listReleases,
   "release create": createRelease,
+  "release add": addToRelease,
+  "release remove": removeFromRelease,
   "interview add": addInterviewEntry,
   "spec-version add": addSpecVersion,
   "note add": addNote,
@@ -95,18 +101,62 @@ async function listReleases() {
     console.log("Ce projet n'a pas encore de Release.");
     return;
   }
-  console.log(releases.map(({ number, title }) => `R-${number} · ${title} · aucune User Story`).join("\n"));
+  console.log(
+    releases
+      .map(({ number, title, userStories }) => {
+        const group = userStories.map((userStory) => `US-${userStory}`).join(", ") || "aucune User Story";
+        return `R-${number} · ${title} · ${group}`;
+      })
+      .join("\n"),
+  );
 }
 
-// Creates a Release in the linked Project. Without a title, Specster's refusal says to write one.
-async function createRelease([title = ""]) {
+// Creates a Release in the linked Project, then adds the User Stories named, in a second request: when they are refused,
+// the Release stays, already announced. Without a title, Specster's refusal says to write one.
+async function createRelease([title = "", ...references]) {
+  const numbers = references.length > 0 ? userStoryNumbers(references) : [];
   const { url, project } = linkedProject();
-  const created = await api(url, `/api/projets/${project}/releases`, {
-    method: "POST",
-    body: JSON.stringify({ title }),
+  const path = `/api/projets/${project}/releases`;
+  const created = await api(url, path, { method: "POST", body: JSON.stringify({ title }), contentType: "application/json" });
+  console.log(`R-${created.number} créée : « ${created.title} ».`);
+  if (numbers.length > 0) {
+    await changeGroup({ name: `R-${created.number}`, url, path: `${path}/${created.number}` }, "add", numbers);
+  }
+}
+
+// Adds the User Stories to the Release, all or none. Asking again changes nothing.
+async function addToRelease([reference, ...references]) {
+  const release = releaseAt(reference);
+  await changeGroup(release, "add", userStoryNumbers(references));
+}
+
+// Takes the User Stories out of the Release, all or none, without deleting them. Asking again changes nothing.
+async function removeFromRelease([reference, ...references]) {
+  const release = releaseAt(reference);
+  await changeGroup(release, "remove", userStoryNumbers(references));
+}
+
+// Sends the change, and says what it did to each User Story, in the order the User named them.
+async function changeGroup(release, change, numbers) {
+  const { userStories } = await api(release.url, `${release.path}/user-stories`, {
+    method: "PATCH",
+    body: JSON.stringify({ [change]: numbers }),
     contentType: "application/json",
   });
-  console.log(`R-${created.number} créée : « ${created.title} ».`);
+  const said =
+    change === "add"
+      ? (name, changed) => (changed ? `${name} ajoutée à ${release.name}.` : `${name} était déjà dans ${release.name}.`)
+      : (name, changed) => (changed ? `${name} retirée de ${release.name}.` : `${name} n'était pas dans ${release.name}.`);
+  console.log(userStories.map(({ number, changed }) => said(`US-${number}`, changed)).join("\n"));
+}
+
+// The numbers of the User Stories a change of a group names, all of them by US-n: the Release says which Project.
+function userStoryNumbers(references) {
+  const numbers = references.map((reference) => /^US-([1-9][0-9]*)$/i.exec(reference)?.[1]);
+  if (numbers.length === 0 || numbers.includes(undefined)) {
+    throw new UserError(`Désignez les User Stories par US-n.\n\n${USAGE}`);
+  }
+  return numbers.map(Number);
 }
 
 // Adds what comes on the standard input, word for word, as the next Entry of the User Story's Interview.
