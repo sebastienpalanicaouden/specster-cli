@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Specster from the command line, for a terminal or an agent: links a folder to a Project, then lists and creates its
-// Releases, changes their groups and Tags, adds to their Interviews, writes their Notes and archives them, reads a User
-// Story's Interview, reads and adds to its Spec Versions, writes its Notes, gives it its Labels and archives it, through
-// Specster's API, with the User's Personal Token.
+// Releases, changes their groups and Tags, adds to their Interviews and Spec Versions, writes their Notes, archives them
+// and reads them whole, writes a User Story's Notes, gives it its Labels and archives it, through Specster's API, with the
+// User's Personal Token.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -22,7 +22,7 @@ const USAGE = `Usage :
   specster release archive <R-n>      archive la Release, avec ses User Stories
   specster release unarchive <R-n>    désarchive la Release, avec ses User Stories
   specster interview add <R-n>        ajoute l'entrée standard à l'interview de la Release
-  specster spec-version add <US-n>    ajoute l'entrée standard, du HTML, comme version de spec
+  specster spec-version add <R-n>     ajoute l'entrée standard, du HTML, comme version de spec de la Release
   specster note add <US-n|R-n>        ajoute l'entrée standard comme note de la User Story ou de la Release
   specster note edit <US-n|R-n> <N>   remplace le texte de la note N par l'entrée standard
   specster note list <US-n|R-n>       affiche les notes de la User Story ou de la Release
@@ -33,9 +33,9 @@ const USAGE = `Usage :
                                       retire des Labels de la User Story ou de la Release
   specster archive <US-n>             archive la User Story, si elle n'est dans aucune Release
   specster unarchive <US-n>           désarchive la User Story, si elle n'est dans aucune Release
-  specster load <US-n> [vN]           affiche la User Story, son interview et une version de spec,
-                                      la version courante si vN n'est pas donnée
-  specster load <R-n>                 affiche la Release
+  specster load <R-n> [vN]            affiche la Release, ses User Stories avec leurs notes, son interview et
+                                      une version de spec, la version courante si vN n'est pas donnée
+  specster load <US-n> [vN]           affiche la Release de la User Story, ou, sans Release, sa phrase et ses notes
 
 Une User Story se désigne par US-n dans un dossier relié, ou par son adresse.
 Une Release se désigne par R-n dans un dossier relié, ou par son adresse.
@@ -218,15 +218,16 @@ async function addInterviewEntry([reference]) {
   console.log(`Ajout enregistré dans l'interview de ${target.name}.`);
 }
 
-// Adds what comes on the standard input, HTML kept byte for byte, as the User Story's next Spec Version.
+// Adds what comes on the standard input, HTML kept byte for byte, as the Release's next Spec Version. A User Story named
+// instead goes to Specster all the same, whose refusal says which Release to use.
 async function addSpecVersion([reference]) {
-  const userStory = userStoryAt(reference);
-  const { number } = await api(userStory.url, `${userStory.path}/v`, {
+  const target = namedUserStory(reference) ?? releaseAt(reference);
+  const { number } = await api(target.url, `${target.path}/v`, {
     method: "POST",
     body: await standardInput(),
     contentType: "text/html; charset=utf-8",
   });
-  console.log(`${userStory.name} v${number} ajoutée : c'est la Version courante.`);
+  console.log(`${target.name} v${number} ajoutée : c'est la Version courante.`);
 }
 
 // Adds what comes on the standard input, word for word, as the next Note of the User Story or the Release.
@@ -321,41 +322,93 @@ async function unarchive([reference]) {
   console.log(changed ? `${userStory.name} désarchivée.` : `${userStory.name} n'était pas archivée.`);
 }
 
-// The User Story, its Interview and one of its Spec Versions, the Current Spec Version unless told otherwise, when it
-// was archived if it is, and its Labels if it has any. Never its Notes, which note list prints.
+// What an agent reads before working on the Release or the User Story. A User Story in a Release leads to it, as it holds
+// its Interview and its Spec Versions. Nothing is printed unless all of it can be.
 async function load([reference, version]) {
-  if (namesRelease(reference)) return loadRelease(reference);
-  const userStory = userStoryAt(reference);
+  const target = namesRelease(reference) ? releaseAt(reference) : userStoryAt(reference);
   const asked = version === undefined ? null : /^v?([1-9][0-9]*)$/i.exec(version)?.[1];
   if (asked === undefined) throw new UserError(`Désignez la version de spec par vN, comme v2.\n\n${USAGE}`);
-  const { number, sentence, currentSpecVersion, archivedAt, labels } = await api(userStory.url, userStory.path);
-  const { entries } = await api(userStory.url, `${userStory.path}/interview`);
-  const interview =
-    entries.length === 0
-      ? ["Cette User Story n'a pas encore d'interview."]
-      : entries.map(({ text, createdAt }) => `### Ajout du ${DATE_FORMAT.format(new Date(createdAt))}\n\n${text}`);
-  const shown = asked === null ? currentSpecVersion : Number(asked);
-  const specVersion =
-    shown === null
-      ? ["## Version de spec", "Cette User Story n'a pas encore de version de spec."]
-      : [
-          `## Version de spec v${shown}${shown === currentSpecVersion ? " (Version courante)" : ""}`,
-          await api(userStory.url, `${userStory.path}/v/${shown}`, { as: "text" }),
-        ];
-  // Null while in progress, missing from a Specster that has no archiving yet.
-  const archived = archivedAt ? [`Archivée le ${DATE_FORMAT.format(new Date(archivedAt))}`] : [];
-  // Missing from a Specster that has no Labels yet.
-  const labelled = labels?.length > 0 ? [`Labels : ${labels.join(", ")}`] : [];
-  console.log(
-    [`# US-${number} · ${sentence}`, ...archived, ...labelled, "## Interview", ...interview, ...specVersion].join("\n\n"),
-  );
+  const shown = asked === null ? null : Number(asked);
+  console.log(namesRelease(reference) ? await loadedRelease(target, shown) : await loadedUserStory(target, shown));
 }
 
-// The Release's number and title.
-async function loadRelease(reference) {
-  const release = releaseAt(reference);
-  const { number, title } = await api(release.url, release.path);
-  console.log(`# R-${number} · ${title}`);
+// The Release as `load` prints it, with the Spec Version asked for, or the Current Spec Version. The Notes it shows are
+// those of its User Stories: its own are for note list.
+async function loadedRelease(release, asked) {
+  const { number, title, tag, archivedAt, labels, userStories, currentSpecVersion, specVersions } = await api(
+    release.url,
+    release.path,
+  );
+  const shown = asked ?? currentSpecVersion;
+  if (shown !== null && !specVersions.some((specVersion) => specVersion.number === shown)) {
+    throw new UserError(`${release.name} n'a pas de v${shown}.`);
+  }
+  const { entries } = await api(release.url, `${release.path}/interview`);
+  const group =
+    userStories.length === 0
+      ? ["Cette Release n'a pas encore de User Story."]
+      : userStories.map(({ number: userStory, sentence, notes }) =>
+          [
+            `US-${userStory} · ${sentence}`,
+            // Indented whole, so that only a User Story starts a line.
+            ...notes.map((note) => `  ${noteLine(note).replaceAll("\n", "\n  ")}`),
+          ].join("\n"),
+        );
+  const interview =
+    entries.length === 0
+      ? ["Cette Release n'a pas encore d'interview."]
+      : entries.map(({ text, createdAt }) => `### Ajout du ${DATE_FORMAT.format(new Date(createdAt))}\n\n${text}`);
+  const specVersion =
+    shown === null
+      ? ["## Version de spec", "Cette Release n'a pas encore de version de spec."]
+      : [
+          `## Version de spec v${shown}${shown === currentSpecVersion ? " (Version courante)" : ""}`,
+          await api(release.url, `${release.path}/v/${shown}`, { as: "text" }),
+        ];
+  return [
+    `# R-${number} · ${title}`,
+    ...archivedLine(archivedAt),
+    `Tag : ${tag ?? "aucun"}`,
+    ...labelsLine(labels),
+    "## User Stories",
+    ...group,
+    "## Interview",
+    ...interview,
+    ...specVersion,
+  ].join("\n\n");
+}
+
+// The Release of the User Story as `load` prints it, or, without one, all that the User Story has: no Spec Version.
+async function loadedUserStory(userStory, asked) {
+  const { number, sentence, archivedAt, labels, release } = await api(userStory.url, userStory.path);
+  if (release !== null) {
+    const path = userStory.path.replace(/\/us\/[0-9]+$/, `/releases/${release}`);
+    const loaded = await loadedRelease({ name: `R-${release}`, url: userStory.url, path }, asked);
+    return `US-${number} est dans R-${release}.\n\n${loaded}`;
+  }
+  if (asked !== null) throw new UserError(`US-${number} n'est dans aucune Release : elle n'a pas de v${asked}.`);
+  const { notes } = await api(userStory.url, `${userStory.path}/notes`);
+  return [
+    `# US-${number} · ${sentence}`,
+    ...archivedLine(archivedAt),
+    ...labelsLine(labels),
+    "Aucune Release.",
+    ...notes.map(noteLine),
+  ].join("\n\n");
+}
+
+// Null while in progress.
+function archivedLine(archivedAt) {
+  return archivedAt ? [`Archivée le ${DATE_FORMAT.format(new Date(archivedAt))}`] : [];
+}
+
+function labelsLine(labels) {
+  return labels.length > 0 ? [`Labels : ${labels.join(", ")}`] : [];
+}
+
+// Without the line break a heredoc ends with.
+function noteLine({ number, text }) {
+  return `Note ${number} : ${text.replace(/\n+$/, "")}`;
 }
 
 // Where the API keeps the Release the User names, as R-n in a linked folder or by its address.
