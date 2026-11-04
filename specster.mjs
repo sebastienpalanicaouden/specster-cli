@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Specster from the command line, for a terminal or an agent: links a folder to a Project, then lists and creates its
-// Releases, changes their groups and Tags, writes their Notes and archives them, reads and adds to a User Story's
-// Interview and Spec Versions, writes its Notes, gives it its Labels and archives it, through Specster's API, with the
-// User's Personal Token.
+// Releases, changes their groups and Tags, adds to their Interviews, writes their Notes and archives them, reads a User
+// Story's Interview, reads and adds to its Spec Versions, writes its Notes, gives it its Labels and archives it, through
+// Specster's API, with the User's Personal Token.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -21,7 +21,7 @@ const USAGE = `Usage :
   specster release tag <R-n> <texte>  pose le tag de la Release, un texte vide le retire
   specster release archive <R-n>      archive la Release, avec ses User Stories
   specster release unarchive <R-n>    désarchive la Release, avec ses User Stories
-  specster interview add <US-n>       ajoute l'entrée standard à l'interview de la User Story
+  specster interview add <R-n>        ajoute l'entrée standard à l'interview de la Release
   specster spec-version add <US-n>    ajoute l'entrée standard, du HTML, comme version de spec
   specster note add <US-n|R-n>        ajoute l'entrée standard comme note de la User Story ou de la Release
   specster note edit <US-n|R-n> <N>   remplace le texte de la note N par l'entrée standard
@@ -210,11 +210,12 @@ function userStoryNumbers(references) {
   return numbers.map(Number);
 }
 
-// Adds what comes on the standard input, word for word, as the next Entry of the User Story's Interview.
+// Adds what comes on the standard input, word for word, as the next Entry of the Release's Interview. A User Story named
+// instead goes to Specster all the same, whose refusal says which Release to use.
 async function addInterviewEntry([reference]) {
-  const userStory = userStoryAt(reference);
-  await api(userStory.url, `${userStory.path}/interview`, { method: "POST", ...(await plainTextInput()) });
-  console.log(`Ajout enregistré dans l'interview de ${userStory.name}.`);
+  const target = namedUserStory(reference) ?? releaseAt(reference);
+  await api(target.url, `${target.path}/interview`, { method: "POST", ...(await plainTextInput()) });
+  console.log(`Ajout enregistré dans l'interview de ${target.name}.`);
 }
 
 // Adds what comes on the standard input, HTML kept byte for byte, as the User Story's next Spec Version.
