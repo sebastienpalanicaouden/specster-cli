@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Specster from the command line, for a terminal or an agent: links a folder to a Project, then lists and creates its
-// Releases, changes their groups and Tags and archives them, reads and adds to a User Story's Interview and Spec
-// Versions, writes its Notes, gives it the Project's Labels and archives it, through Specster's API, with the User's
-// Personal Token.
+// Releases, changes their groups and Tags, writes their Notes and archives them, reads and adds to a User Story's
+// Interview and Spec Versions, writes its Notes, gives it the Project's Labels and archives it, through Specster's API,
+// with the User's Personal Token.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -23,9 +23,9 @@ const USAGE = `Usage :
   specster release unarchive <R-n>    désarchive la Release, avec ses User Stories
   specster interview add <US-n>       ajoute l'entrée standard à l'interview de la User Story
   specster spec-version add <US-n>    ajoute l'entrée standard, du HTML, comme version de spec
-  specster note add <US-n>            ajoute l'entrée standard comme note de la User Story
-  specster note edit <US-n> <N>       remplace le texte de la note N par l'entrée standard
-  specster note list <US-n>           affiche les notes de la User Story
+  specster note add <US-n|R-n>        ajoute l'entrée standard comme note de la User Story ou de la Release
+  specster note edit <US-n|R-n> <N>   remplace le texte de la note N par l'entrée standard
+  specster note list <US-n|R-n>       affiche les notes de la User Story ou de la Release
   specster label list                 affiche les Labels du projet, avec leur couleur
   specster label add <US-n> <nom>…    pose des Labels du projet sur la User Story
   specster label remove <US-n> <nom>… retire des Labels de la User Story
@@ -225,27 +225,29 @@ async function addSpecVersion([reference]) {
   console.log(`${userStory.name} v${number} ajoutée : c'est la Version courante.`);
 }
 
-// Adds what comes on the standard input, word for word, as the User Story's next Note.
+// Adds what comes on the standard input, word for word, as the next Note of the User Story or the Release.
 async function addNote([reference]) {
-  const userStory = userStoryAt(reference);
-  const { number } = await api(userStory.url, `${userStory.path}/notes`, { method: "POST", ...(await plainTextInput()) });
-  console.log(`Note ${number} ajoutée à ${userStory.name}.`);
+  const target = userStoryOrReleaseAt(reference);
+  const { number } = await api(target.url, `${target.path}/notes`, { method: "POST", ...(await plainTextInput()) });
+  console.log(`Note ${number} ajoutée à ${target.name}.`);
 }
 
-// Replaces the text of the User Story's Note, named by its number, with what comes on the standard input.
+// Replaces the text of the Note of the User Story or the Release, named by its number, with what comes on the standard
+// input.
 async function editNote([reference, number]) {
-  const userStory = userStoryAt(reference);
+  const target = userStoryOrReleaseAt(reference);
   if (!/^[1-9][0-9]*$/.test(number ?? "")) throw new UserError(`Désignez la note par son numéro, comme 2.\n\n${USAGE}`);
-  await api(userStory.url, `${userStory.path}/notes/${number}`, { method: "PUT", ...(await plainTextInput()) });
-  console.log(`Note ${number} de ${userStory.name} modifiée.`);
+  await api(target.url, `${target.path}/notes/${number}`, { method: "PUT", ...(await plainTextInput()) });
+  console.log(`Note ${number} de ${target.name} modifiée.`);
 }
 
-// The User Story's Notes, oldest first, in Markdown: each under its number and dates, such as before changing one.
+// The Notes of the User Story or the Release, oldest first, in Markdown: each under its number and dates, such as
+// before changing one.
 async function listNotes([reference]) {
-  const userStory = userStoryAt(reference);
-  const { notes } = await api(userStory.url, `${userStory.path}/notes`);
+  const target = userStoryOrReleaseAt(reference);
+  const { notes } = await api(target.url, `${target.path}/notes`);
   if (notes.length === 0) {
-    console.log("Cette User Story n'a pas encore de note.");
+    console.log(`Cette ${namesRelease(reference) ? "Release" : "User Story"} n'a pas encore de note.`);
     return;
   }
   const listed = notes.map(({ number, text, createdAt, editedAt }) => {
@@ -346,13 +348,20 @@ async function loadRelease(reference) {
 
 // Where the API keeps the Release the User names, as R-n in a linked folder or by its address.
 function releaseAt(reference) {
+  const release = namedRelease(reference);
+  if (!release) throw new UserError(`Désignez la Release par R-n ou par son adresse.\n\n${USAGE}`);
+  return release;
+}
+
+// Null when the reference is malformed.
+function namedRelease(reference) {
   const byAddress = /^(https?:\/\/[^/]+)\/projets\/([0-9a-f-]{36})\/releases\/([1-9][0-9]*)\/?$/i.exec(reference ?? "");
   if (byAddress) {
     const [, url, project, number] = byAddress;
     return { name: `R-${number}`, url, path: `/api/projets/${project}/releases/${number}` };
   }
   const byNumber = /^R-([1-9][0-9]*)$/i.exec(reference ?? "");
-  if (!byNumber) throw new UserError(`Désignez la Release par R-n ou par son adresse.\n\n${USAGE}`);
+  if (!byNumber) return null;
   const { url, project } = linkedProject();
   return { name: `R-${byNumber[1]}`, url, path: `/api/projets/${project}/releases/${byNumber[1]}` };
 }
@@ -364,15 +373,29 @@ function namesRelease(reference) {
 
 // Where the API keeps the User Story the User names, as US-n in a linked folder or by its address.
 function userStoryAt(reference) {
+  const userStory = namedUserStory(reference);
+  if (!userStory) throw new UserError(`Désignez la User Story par US-n ou par son adresse.\n\n${USAGE}`);
+  return userStory;
+}
+
+// Null when the reference is malformed.
+function namedUserStory(reference) {
   const byAddress = /^(https?:\/\/[^/]+)\/projets\/([0-9a-f-]{36})\/us\/([1-9][0-9]*)\/?$/i.exec(reference ?? "");
   if (byAddress) {
     const [, url, project, number] = byAddress;
     return { name: `US-${number}`, url, path: `/api/projets/${project}/us/${number}` };
   }
   const byNumber = /^US-([1-9][0-9]*)$/i.exec(reference ?? "");
-  if (!byNumber) throw new UserError(`Désignez la User Story par US-n ou par son adresse.\n\n${USAGE}`);
+  if (!byNumber) return null;
   const { url, project } = linkedProject();
   return { name: `US-${byNumber[1]}`, url, path: `/api/projets/${project}/us/${byNumber[1]}` };
+}
+
+// Where the API keeps the User Story or the Release the User names, for a command that takes either.
+function userStoryOrReleaseAt(reference) {
+  const target = namedUserStory(reference) ?? namedRelease(reference);
+  if (!target) throw new UserError(`Désignez la User Story ou la Release par US-n, R-n ou son adresse.\n\n${USAGE}`);
+  return target;
 }
 
 // The standard input as the body of a request, plain text that the API checks is UTF-8.
