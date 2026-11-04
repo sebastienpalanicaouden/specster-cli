@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Specster from the command line, for a terminal or an agent: links a folder to a Project, then lists and creates its
-// Releases and changes their groups, reads and adds to a User Story's Interview and Spec Versions, writes its Notes,
-// gives it the Project's Labels and archives it, through Specster's API, with the User's Personal Token.
+// Releases, changes their groups and archives them, reads and adds to a User Story's Interview and Spec Versions, writes
+// its Notes, gives it the Project's Labels and archives it, through Specster's API, with the User's Personal Token.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -17,6 +17,8 @@ const USAGE = `Usage :
   specster release add <R-n> <US-n>…  ajoute des User Stories à la Release
   specster release remove <R-n> <US-n>…
                                       retire des User Stories de la Release, sans les supprimer
+  specster release archive <R-n>      archive la Release, avec ses User Stories
+  specster release unarchive <R-n>    désarchive la Release, avec ses User Stories
   specster interview add <US-n>       ajoute l'entrée standard à l'interview de la User Story
   specster spec-version add <US-n>    ajoute l'entrée standard, du HTML, comme version de spec
   specster note add <US-n>            ajoute l'entrée standard comme note de la User Story
@@ -25,8 +27,8 @@ const USAGE = `Usage :
   specster label list                 affiche les Labels du projet, avec leur couleur
   specster label add <US-n> <nom>…    pose des Labels du projet sur la User Story
   specster label remove <US-n> <nom>… retire des Labels de la User Story
-  specster archive <US-n>             archive la User Story
-  specster unarchive <US-n>           désarchive la User Story
+  specster archive <US-n>             archive la User Story, si elle n'est dans aucune Release
+  specster unarchive <US-n>           désarchive la User Story, si elle n'est dans aucune Release
   specster load <US-n> [vN]           affiche la User Story, son interview et une version de spec,
                                       la version courante si vN n'est pas donnée
   specster load <R-n>                 affiche la Release
@@ -59,6 +61,8 @@ const COMMANDS = {
   "release create": createRelease,
   "release add": addToRelease,
   "release remove": removeFromRelease,
+  "release archive": archiveRelease,
+  "release unarchive": unarchiveRelease,
   "interview add": addInterviewEntry,
   "spec-version add": addSpecVersion,
   "note add": addNote,
@@ -103,9 +107,9 @@ async function listReleases() {
   }
   console.log(
     releases
-      .map(({ number, title, userStories }) => {
+      .map(({ number, title, archivedAt, userStories }) => {
         const group = userStories.map((userStory) => `US-${userStory}`).join(", ") || "aucune User Story";
-        return `R-${number} · ${title} · ${group}`;
+        return [`R-${number}`, title, ...(archivedAt ? ["archivée"] : []), group].join(" · ");
       })
       .join("\n"),
   );
@@ -148,6 +152,30 @@ async function changeGroup(release, change, numbers) {
       ? (name, changed) => (changed ? `${name} ajoutée à ${release.name}.` : `${name} était déjà dans ${release.name}.`)
       : (name, changed) => (changed ? `${name} retirée de ${release.name}.` : `${name} n'était pas dans ${release.name}.`);
   console.log(userStories.map(({ number, changed }) => said(`US-${number}`, changed)).join("\n"));
+}
+
+// Archives the Release with its User Stories. A program may ask again: an Archived Release stays as it is.
+async function archiveRelease([reference]) {
+  const release = releaseAt(reference);
+  const { changed, userStories } = await api(release.url, `${release.path}/archive`, { method: "PUT" });
+  console.log(
+    changed ? `${release.name} archivée${withUserStories(userStories)}.` : `${release.name} était déjà archivée.`,
+  );
+}
+
+// Unarchives the Release with its User Stories. Asking again changes nothing.
+async function unarchiveRelease([reference]) {
+  const release = releaseAt(reference);
+  const { changed, userStories } = await api(release.url, `${release.path}/archive`, { method: "DELETE" });
+  console.log(
+    changed ? `${release.name} désarchivée${withUserStories(userStories)}.` : `${release.name} n'était pas archivée.`,
+  );
+}
+
+// What follows the Release in a sentence, such as « , avec US-2, US-3 et US-5 », and nothing for an empty one.
+function withUserStories(numbers) {
+  if (numbers.length === 0) return "";
+  return `, avec ${new Intl.ListFormat("fr").format(numbers.map((number) => `US-${number}`))}`;
 }
 
 // The numbers of the User Stories a change of a group names, all of them by US-n: the Release says which Project.
