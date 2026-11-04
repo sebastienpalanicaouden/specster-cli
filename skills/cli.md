@@ -7,14 +7,14 @@ Run `specster` when the command exists (`command -v specster`); otherwise run `n
 The CLI needs:
 
 - the User's Personal Token in `SPECSTER_TOKEN`. When it is missing, point the User to the README's « Sign in » steps, https://github.com/sebastienpalanicaouden/specster-cli#sign-in, and have them type the token in their own terminal rather than in the conversation;
-- for `US-n`, a `.specster.json` in the current folder or one above it, which `specster init <Project URL>` writes. A User Story's address, such as `https://specster.fr/projets/<id>/us/2`, works without it.
+- for `R-n` and `US-n`, a `.specster.json` in the current folder or one above it, which `specster init <Project URL>` writes. An address works without it: a Release's, such as `https://specster.fr/projets/<id>/releases/3`, or a User Story's, such as `https://specster.fr/projets/<id>/us/2`.
 
 When the CLI exits with 1, its standard error is a message for the User, in French: relay it as it is, with what to do when it says so (create a token, run `init`), and stop there.
 
 Send text on its standard input through a quoted heredoc whose delimiter the text cannot contain, so the shell keeps every character as it is:
 
 ```sh
-specster interview add US-2 <<'SPECSTER_END'
+specster interview add R-2 <<'SPECSTER_END'
 …
 SPECSTER_END
 ```
