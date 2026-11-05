@@ -128,11 +128,11 @@ async function listReleases() {
 async function createRelease([title = "", ...references]) {
   const numbers = references.length > 0 ? userStoryNumbers(references) : [];
   const { url, project } = linkedProject();
-  const path = `/api/projets/${project}/releases`;
-  const created = await api(url, path, { method: "POST", body: JSON.stringify({ title }), contentType: "application/json" });
+  const releases = `/api/projets/${project}/releases`;
+  const created = await api(url, releases, { method: "POST", body: JSON.stringify({ title }), contentType: "application/json" });
   console.log(`R-${created.number} créée : « ${created.title} ».`);
   if (numbers.length > 0) {
-    await changeGroup({ name: `R-${created.number}`, url, path: `${path}/${created.number}` }, "add", numbers);
+    await changeGroup({ name: `R-${created.number}`, url, path: `${releases}/${created.number}` }, "add", numbers);
   }
 }
 
@@ -387,8 +387,8 @@ async function loadedRelease(release, asked) {
 async function loadedUserStory(userStory, asked) {
   const { number, sentence, archivedAt, labels, release } = await api(userStory.url, userStory.path);
   if (release !== null) {
-    const path = userStory.path.replace(/\/us\/[0-9]+$/, `/releases/${release}`);
-    const loaded = await loadedRelease({ name: `R-${release}`, url: userStory.url, path }, asked);
+    const releasePath = userStory.path.replace(/\/us\/[0-9]+$/, `/releases/${release}`);
+    const loaded = await loadedRelease({ name: `R-${release}`, url: userStory.url, path: releasePath }, asked);
     return `US-${number} est dans R-${release}.\n\n${loaded}`;
   }
   if (asked !== null) throw new UserError(`US-${number} n'est dans aucune Release : elle n'a pas de v${asked}.`);
@@ -423,17 +423,8 @@ function releaseAt(reference) {
   return release;
 }
 
-// Null when the reference is malformed.
 function namedRelease(reference) {
-  const byAddress = /^(https?:\/\/[^/]+)\/projets\/([0-9a-f-]{36})\/releases\/([1-9][0-9]*)\/?$/i.exec(reference ?? "");
-  if (byAddress) {
-    const [, url, project, number] = byAddress;
-    return { name: `R-${number}`, url, path: `/api/projets/${project}/releases/${number}` };
-  }
-  const byNumber = /^R-([1-9][0-9]*)$/i.exec(reference ?? "");
-  if (!byNumber) return null;
-  const { url, project } = linkedProject();
-  return { name: `R-${byNumber[1]}`, url, path: `/api/projets/${project}/releases/${byNumber[1]}` };
+  return named(reference, "R", "releases");
 }
 
 // Whether a command that takes either means a Release rather than a User Story, even written wrong, such as R-01.
@@ -448,17 +439,19 @@ function userStoryAt(reference) {
   return userStory;
 }
 
-// Null when the reference is malformed.
 function namedUserStory(reference) {
-  const byAddress = /^(https?:\/\/[^/]+)\/projets\/([0-9a-f-]{36})\/us\/([1-9][0-9]*)\/?$/i.exec(reference ?? "");
-  if (byAddress) {
-    const [, url, project, number] = byAddress;
-    return { name: `US-${number}`, url, path: `/api/projets/${project}/us/${number}` };
-  }
-  const byNumber = /^US-([1-9][0-9]*)$/i.exec(reference ?? "");
-  if (!byNumber) return null;
-  const { url, project } = linkedProject();
-  return { name: `US-${byNumber[1]}`, url, path: `/api/projets/${project}/us/${byNumber[1]}` };
+  return named(reference, "US", "us");
+}
+
+// Where the API keeps what the reference names, by its address, or by its number in a linked folder, such as R-3 with the
+// prefix R. Null when the reference is malformed.
+function named(reference, prefix, collection) {
+  const byAddress = new RegExp(`^(https?://[^/]+)/projets/([0-9a-f-]{36})/${collection}/([1-9][0-9]*)/?$`, "i").exec(reference ?? "");
+  const byNumber = new RegExp(`^${prefix}-([1-9][0-9]*)$`, "i").exec(reference ?? "");
+  if (!byAddress && !byNumber) return null;
+  const { url, project } = byAddress ? { url: byAddress[1], project: byAddress[2] } : linkedProject();
+  const number = byAddress ? byAddress[3] : byNumber[1];
+  return { name: `${prefix}-${number}`, url, path: `/api/projets/${project}/${collection}/${number}` };
 }
 
 // Where the API keeps the User Story or the Release the User names, for a command that takes either.
