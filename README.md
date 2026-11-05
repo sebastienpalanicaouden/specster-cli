@@ -73,6 +73,7 @@ specster archive US-n                      # archives the User Story, if it is i
 specster unarchive US-n                    # unarchives it, if it is in no Release
 specster load R-n [vN]                     # prints the Release, its User Stories, its Interview and a Spec Version, the Current one by default
 specster load US-n [vN]                    # prints the User Story's Release the same way, or, in none, its sentence and Notes
+specster brief R-n                         # prints the Release's Brief: its User Stories with their Notes, its own Notes, and what isn't loaded
 ```
 
 `init` takes the Project's address as your browser shows it, such as `https://specster.fr/projets/<id>`, and writes `.specster.json` in the current folder. The other commands then find it in that folder or the nearest one above, as git does, so `R-3` or `US-2` is enough. A command acting on one Release or User Story also takes its address instead, such as `https://specster.fr/projets/<id>/releases/3` or `https://specster.fr/projets/<id>/us/2`, which needs no linked folder. The User Stories that `release create`, `release add` and `release remove` name go by `US-n` alone, and `release create` needs the link.
@@ -92,6 +93,10 @@ EOF
 
 `load` leaves out a Release's own Notes, which `note list` prints, each under « ### Note 2 · ajoutée le … (modifiée le …) ». A Note is named by its number, as its page shows it, numbered apart on a Release and on each of its User Stories; deleting one is done on that page.
 
+`brief R-n` prints a Release's Brief, what it says of its need, to read alone before a grilling. It is Markdown: the Release's title, when it was archived if it is, « ## User Stories » with each one's sentence and Notes, as `load` prints them, or « Cette Release n'a pas encore de User Story. », then « ## Notes de la Release » with its own Notes, oldest first, each as « Note 1 : … », or « Cette Release n'a pas encore de note. ». A last line says what it leaves out, by a count and a number and nothing of their content: « Non chargées : Interview (2 ajouts), version de spec v3. », or, when only one exists, « Non chargée : Interview (1 ajout). » or « Non chargée : version de spec v3. », naming the Current Spec Version alone. With neither, there is no such line. `brief` never prints the Interview's text, which it reads only to count its Entries, a Spec Version, the Tag, the Labels or the warning about the group.
+
+The Brief loads all the Notes, whole and unfiltered, as the CLI can't sort free text: a Note, such as a delivery Note citing a meta-spec or one proposing a lead, can hold a decision. `brief` takes one Release, by `R-n` or its address: `US-n`, a version after the Release, or anything else gets « Désignez la Release par R-n ou par son adresse. » and the usage. For a User Story in no Release, `load US-n` already gives its sentence and Notes and nothing more.
+
 `label list` prints a Project's two lists apart, under « Labels des User Stories : » and « Labels des Releases : », each line such as « merged · vert », in alphabetical order. The same name in both is two Labels. `label add` and `label remove` choose the list from `US-n` or `R-n`, take one name or more, a name with spaces between quotes, such as `specster label add R-5 bug "À relire"`, recognized whatever their case, and print a line for each Label. They may run again without risk: they then say the User Story or the Release already was as asked. A name that list doesn't have refuses them all and changes nothing, and the message lists its Labels. The CLI creates, renames, recolors and deletes no Label: that is done in Specster, on the Project's « Labels » page or the « Labels des Releases » page.
 
 `archive` and `unarchive` may run again without risk, as above. A User Story in a Release is archived and unarchived with it: both print Specster's refusal, which gives the command to use.
@@ -108,15 +113,24 @@ This repo is also a Claude Code plugin, `specster`, which runs the CLI for you. 
 /plugin install specster --marketplace sebastienpalanicaouden/specster-cli
 ```
 
-It adds three commands, each run by hand:
+It adds four commands, each run by hand:
 
+- `/specster:brief R-n`, before a grilling: loads the Release's Brief into the conversation and reports its title, the sentence of each User Story and how many Notes it loaded. It warns when a new grilling can contradict what isn't loaded, when the Release is archived, as an Interview Entry is then refused until it is unarchived, and when the conversation already holds that Interview or a Spec Version, advising a new one. It blocks nothing, asks no confirmation, and ends on what comes next, leaving the grilling for you to start. Until the grilling is over, the agent loads neither the Interview nor a Spec Version of that Release, even to look up a fact; it takes the title for a mere name, the sentences for the need, and what a Note proposes for a question to ask, never a settled decision.
 - `/specster:interview R-n`, at the end of a grilling: saves its questions and answers, word for word, as the next Entry of the Release's Interview.
-- `/specster:meta-spec R-n ["change request"]`: writes the Release's meta-spec, a functional spec holding a mockup, from its Interview; or, given a sentence, its next version, changed only where the request reaches. You try the draft in your browser, and it is added to Specster as a Spec Version once you approve it. After a change of the group, it writes the next version: it adds to the Interview the questions and answers of a User Story added, notes the change in the « Versions » section, such as « Depuis v1 : US-33 retirée. », and has the open tickets cite the new version, a closed one keeping its citation.
+- `/specster:meta-spec R-n ["change request"]`: writes the Release's meta-spec, a functional spec holding a mockup, from its Interview; or, given a sentence, its next version, changed only where the request reaches. You try the draft in your browser, and it is added to Specster as a Spec Version once you approve it. After a change of the group, it writes the next version: it adds to the Interview the questions and answers of a User Story added, notes the change in the « Versions » section, such as « Depuis v1 : US-33 retirée. », and has the open tickets cite the new version, a closed one keeping its citation. When two Entries of the Interview contradict each other, it shows you both decisions with their dates and asks which holds, then saves the question and your answer as a new Entry, so the question doesn't come back at the next version, and the content follows your answer; a change request draws on no Entry, so it asks nothing of the kind. A later Entry that already chose between them holds, and it asks nothing; otherwise the most recent doesn't win by itself, as a grilling from a Brief can contradict by ignorance, not by choice.
 - `/specster:load R-n [vN]`: loads the Release, its User Stories, its Interview and a Spec Version, the Current one by default, into the conversation, before `/to-spec` or `/implement` for instance. It also takes `US-n`, and loads the Release it is in.
 
 `/specster:interview` and `/specster:meta-spec` confirm the Release by reading the sentences of all its User Stories. Given `US-n`, they propose its Release, or to create one.
 
 They need the same `SPECSTER_TOKEN`, and a folder linked with `specster init` for `R-n` and `US-n`.
+
+To grill a Release from its need alone, take three steps, in a new conversation:
+
+1. `/specster:brief R-n`.
+2. The grilling, which you start yourself.
+3. `/specster:interview R-n`, which saves it as the next Entry of the Interview.
+
+A grilling works with what its conversation holds, so the Brief and the grilling follow each other in one conversation. That conversation is a new one because an Interview or a Spec Version already in it would guide the agent with decisions already made: `/specster:brief` says so, and gives the Brief all the same. `/specster:interview` then loads the whole Release, at no risk, as the grilling is over and its transcript stays word for word. `/specster:meta-spec R-n` can follow there or elsewhere, as it reloads the whole Release.
 
 ## Link a repo
 

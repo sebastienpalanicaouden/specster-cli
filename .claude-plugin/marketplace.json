@@ -8,7 +8,7 @@
     {
       "name": "specster",
       "source": "./",
-      "description": "Save a grilling as a Release's Interview, write its meta-spec as a Spec Version, load both back.",
+      "description": "Save a grilling as a Release's Interview, write its meta-spec as a Spec Version, load both back, or load only the need before a new grilling.",
       "category": "productivity",
       "keywords": ["specster", "spec", "release", "user-story"]
     }

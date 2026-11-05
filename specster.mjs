@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Specster from the command line, for a terminal or an agent: links a folder to a Project, then lists and creates its
 // Releases, changes their groups and Tags, adds to their Interviews and Spec Versions, writes their Notes, archives them
-// and reads them whole, writes a User Story's Notes, gives it its Labels and archives it, through Specster's API, with the
-// User's Personal Token.
+// and reads them, whole or as a Brief, writes a User Story's Notes, gives it its Labels and archives it, through Specster's
+// API, with the User's Personal Token.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -36,6 +36,7 @@ const USAGE = `Usage :
   specster load <R-n> [vN]            affiche la Release, ses User Stories avec leurs notes, son interview et
                                       une version de spec, la version courante si vN n'est pas donnée
   specster load <US-n> [vN]           affiche la Release de la User Story, ou, sans Release, sa phrase et ses notes
+  specster brief <R-n>                affiche la Release, ses User Stories avec leurs notes, et ses notes
 
 Une User Story se désigne par US-n dans un dossier relié, ou par son adresse.
 Une Release se désigne par R-n dans un dossier relié, ou par son adresse.
@@ -79,6 +80,7 @@ const COMMANDS = {
   archive,
   unarchive,
   load,
+  brief,
 };
 
 try {
@@ -346,16 +348,6 @@ async function loadedRelease(release, asked) {
   const covered = specVersions.find((specVersion) => specVersion.number === shown)?.covers;
   if (shown !== null && !covered) throw new UserError(`${release.name} n'a pas de v${shown}.`);
   const { entries } = await api(release.url, `${release.path}/interview`);
-  const group =
-    userStories.length === 0
-      ? ["Cette Release n'a pas encore de User Story."]
-      : userStories.map(({ number: userStory, sentence, notes }) =>
-          [
-            `US-${userStory} · ${sentence}`,
-            // Indented whole, so that only a User Story starts a line.
-            ...notes.map((note) => `  ${noteLine(note).replaceAll("\n", "\n  ")}`),
-          ].join("\n"),
-        );
   const interview =
     entries.length === 0
       ? ["Cette Release n'a pas encore d'interview."]
@@ -370,12 +362,10 @@ async function loadedRelease(release, asked) {
           await api(release.url, `${release.path}/v/${shown}`, { as: "text" }),
         ];
   return [
-    `# R-${number} · ${title}`,
-    ...archivedLine(archivedAt),
+    ...releaseHeading({ number, title, archivedAt }),
     `Tag : ${tag ?? "aucun"}`,
     ...labelsLine(labels),
-    "## User Stories",
-    ...group,
+    ...userStoriesSection(userStories),
     "## Interview",
     ...interview,
     ...specVersion,
@@ -400,6 +390,56 @@ async function loadedUserStory(userStory, asked) {
     "Aucune Release.",
     ...notes.map(noteLine),
   ].join("\n\n");
+}
+
+// The Brief: what the Release says of its need, for an agent to read alone before a grilling. Its Interview is read only to
+// count its Entries. Nothing is printed unless all of it can be.
+async function brief([reference, ...others]) {
+  // Anything after the Release gets the same refusal, so that no argument is ignored in silence.
+  const release = releaseAt(others.length === 0 ? reference : null);
+  const [{ number, title, archivedAt, userStories, currentSpecVersion }, { notes }, { entries }] = await Promise.all([
+    api(release.url, release.path),
+    api(release.url, `${release.path}/notes`),
+    api(release.url, `${release.path}/interview`),
+  ]);
+  console.log(
+    [
+      ...releaseHeading({ number, title, archivedAt }),
+      ...userStoriesSection(userStories),
+      "## Notes de la Release",
+      ...(notes.length > 0 ? notes.map(noteLine) : ["Cette Release n'a pas encore de note."]),
+      ...notLoadedLine(entries.length, currentSpecVersion),
+    ].join("\n\n"),
+  );
+}
+
+// What the Brief leaves out, by a count and a number, nothing of their content, and no line when there is none of it.
+function notLoadedLine(entryCount, currentSpecVersion) {
+  const interview = entryCount > 0 ? [`Interview (${entryCount} ${entryCount === 1 ? "ajout" : "ajouts"})`] : [];
+  const specVersion = currentSpecVersion === null ? [] : [`version de spec v${currentSpecVersion}`];
+  const notLoaded = [...interview, ...specVersion];
+  if (notLoaded.length === 0) return [];
+  return [`${notLoaded.length === 1 ? "Non chargée" : "Non chargées"} : ${notLoaded.join(", ")}.`];
+}
+
+// How `load` and `brief` start a Release.
+function releaseHeading({ number, title, archivedAt }) {
+  return [`# R-${number} · ${title}`, ...archivedLine(archivedAt)];
+}
+
+// The User Stories of a Release, as `load` and `brief` print them.
+function userStoriesSection(userStories) {
+  const group =
+    userStories.length === 0
+      ? ["Cette Release n'a pas encore de User Story."]
+      : userStories.map(({ number, sentence, notes }) =>
+          [
+            `US-${number} · ${sentence}`,
+            // Indented whole, so that only a User Story starts a line.
+            ...notes.map((note) => `  ${noteLine(note).replaceAll("\n", "\n  ")}`),
+          ].join("\n"),
+        );
+  return ["## User Stories", ...group];
 }
 
 // Null while in progress.

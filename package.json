@@ -1,6 +1,6 @@
 {
   "name": "specster-cli",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Specster from the command line: Releases with their group, Tag, Interview and Spec Versions, the Notes and Labels of Releases and User Stories, and their archiving, for a terminal or an agent.",
   "type": "module",
   "bin": {
