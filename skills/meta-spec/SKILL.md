@@ -19,7 +19,7 @@ Run the CLI as [`../cli.md`](../cli.md) says. What a meta-spec holds, and what S
    - Without a change request or a group change: every decision of the Interview.
    - With either: the Current Spec Version, unchanged except where they reach. A User Story added brings its rules from the Interview; one removed takes out those only it needed. When a change request leaves a choice open, such as « une autre couleur » naming no colour, ask the User, offering two or three options that suit the page; when it is clear, ask nothing.
 
-   Check the Interview's decisions this content draws on: all of them without a change request or a group change; on a group change, those a User Story added brings. A change request, or a group change that only removes, draws on none: skip this check, and say nothing of it. Among the decisions it draws on, look for two from different Entries that can't both hold:
+   Check the Interview's decisions this content draws on: all of them without a change request or a group change; on a group change, those a User Story added brings. A change request, or a group change that only removes, draws on none: skip this check, and say nothing of it. Look for a decision it draws on and one from another Entry, of any date, that can't both hold:
 
    - **Already settled**: a later Entry chooses between them, knowing both, as an answer to the question below does. That Entry holds: leave the question unasked.
    - **Not settled**: the User chooses, even when one Entry is more recent. Never pick the most recent on your own, as a grilling from a Brief can contradict by ignorance, not by choice. Show the two decisions with their dates and ask which holds, in French, offering each as an answer, such as:
@@ -35,7 +35,7 @@ Run the CLI as [`../cli.md`](../cli.md) says. What a meta-spec holds, and what S
 
    When the check leaves nothing to ask, say so, such as « Aucun ajout n'en contredit un autre. »
 
-   Done when every rule, state and mockup detail traces back to the Interview, the change request or the group change, and every contradiction among the decisions this content draws on is settled: by an Entry already there, or by a new one the CLI confirmed with « Ajout enregistré dans l'interview de R-n. »
+   Done when every rule, state and mockup detail traces back to the Interview, the change request or the group change, and every contradiction touching a decision this content draws on is settled: by an Entry already there, or by a new one the CLI confirmed with « Ajout enregistré dans l'interview de R-n. »
 4. **Write the draft** to a file in a temporary folder outside the repo (`mktemp -d`), named after the Release, such as `R-2.html`, and open it in the User's browser (`open` on macOS, `xdg-open` on Linux). With a change request or a group change, add its line to the « Versions » section. Done when the draft opens in the browser.
 5. **Get the User's approval**: ask them to try the draft, and correct the file until they approve it. Done when they approve.
 6. **Send it**: `specster spec-version add <R-n> < <draft>`, then delete the temporary folder. Done when the CLI prints « R-n vN ajoutée : c'est la Version courante. » and the folder is gone.
