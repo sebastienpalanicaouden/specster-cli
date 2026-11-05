@@ -414,8 +414,8 @@ async function brief([reference, ...others]) {
 }
 
 // What the Brief leaves out, by a count and a number, nothing of their content, and no line when there is none of it.
-function notLoadedLine(entries, currentSpecVersion) {
-  const interview = entries > 0 ? [`Interview (${entries} ${entries === 1 ? "ajout" : "ajouts"})`] : [];
+function notLoadedLine(entryCount, currentSpecVersion) {
+  const interview = entryCount > 0 ? [`Interview (${entryCount} ${entryCount === 1 ? "ajout" : "ajouts"})`] : [];
   const specVersion = currentSpecVersion === null ? [] : [`version de spec v${currentSpecVersion}`];
   const notLoaded = [...interview, ...specVersion];
   if (notLoaded.length === 0) return [];
