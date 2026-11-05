@@ -113,8 +113,9 @@ This repo is also a Claude Code plugin, `specster`, which runs the CLI for you. 
 /plugin install specster --marketplace sebastienpalanicaouden/specster-cli
 ```
 
-It adds three commands, each run by hand:
+It adds four commands, each run by hand:
 
+- `/specster:brief R-n`, before a grilling: loads the Release's Brief into the conversation and reports its title, the sentence of each User Story and how many Notes it loaded. It warns when a new grilling can contradict what isn't loaded, when the Release is archived, as an Interview Entry is then refused until it is unarchived, and when the conversation already holds that Interview or a Spec Version, advising a new one. It blocks nothing, asks no confirmation, and ends on what comes next, leaving the grilling for you to start. Until the grilling is over, the agent loads neither the Interview nor a Spec Version of that Release, even to look up a fact; it takes the title for a mere name, the sentences for the need, and what a Note proposes for a question to ask, never a settled decision.
 - `/specster:interview R-n`, at the end of a grilling: saves its questions and answers, word for word, as the next Entry of the Release's Interview.
 - `/specster:meta-spec R-n ["change request"]`: writes the Release's meta-spec, a functional spec holding a mockup, from its Interview; or, given a sentence, its next version, changed only where the request reaches. You try the draft in your browser, and it is added to Specster as a Spec Version once you approve it. After a change of the group, it writes the next version: it adds to the Interview the questions and answers of a User Story added, notes the change in the « Versions » section, such as « Depuis v1 : US-33 retirée. », and has the open tickets cite the new version, a closed one keeping its citation.
 - `/specster:load R-n [vN]`: loads the Release, its User Stories, its Interview and a Spec Version, the Current one by default, into the conversation, before `/to-spec` or `/implement` for instance. It also takes `US-n`, and loads the Release it is in.
@@ -122,6 +123,14 @@ It adds three commands, each run by hand:
 `/specster:interview` and `/specster:meta-spec` confirm the Release by reading the sentences of all its User Stories. Given `US-n`, they propose its Release, or to create one.
 
 They need the same `SPECSTER_TOKEN`, and a folder linked with `specster init` for `R-n` and `US-n`.
+
+To grill a Release from its need alone, take three steps, in a new conversation:
+
+1. `/specster:brief R-n`.
+2. The grilling, which you start yourself.
+3. `/specster:interview R-n`, which saves it as the next Entry of the Interview.
+
+A grilling works with what its conversation holds, so the Brief and the grilling follow each other in one conversation. That conversation is a new one because an Interview or a Spec Version already in it would guide the agent with decisions already made: `/specster:brief` says so, and gives the Brief all the same. `/specster:interview` then loads the whole Release, at no risk, as the grilling is over and its transcript stays word for word. `/specster:meta-spec R-n` can follow there or elsewhere, as it reloads the whole Release.
 
 ## Link a repo
 

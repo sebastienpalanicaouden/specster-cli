@@ -1,7 +1,7 @@
 {
   "name": "specster",
   "version": "0.2.0",
-  "description": "Keep a feature's design context in Specster: save a grilling as a Release's Interview, write its meta-spec as a Spec Version, load both back in another session.",
+  "description": "Keep a feature's design context in Specster: save a grilling as a Release's Interview, write its meta-spec as a Spec Version, load both back in another session, or load only the need before a new grilling.",
   "author": {
     "name": "Sébastien Palanicaouden"
   },
@@ -9,5 +9,5 @@
   "repository": "https://github.com/sebastienpalanicaouden/specster-cli",
   "license": "MIT",
   "keywords": ["specster", "spec", "release", "user-story", "grilling"],
-  "skills": ["./skills/interview", "./skills/meta-spec", "./skills/load"]
+  "skills": ["./skills/brief", "./skills/interview", "./skills/meta-spec", "./skills/load"]
 }
