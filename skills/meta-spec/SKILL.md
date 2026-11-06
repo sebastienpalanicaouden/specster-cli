@@ -4,12 +4,14 @@ description: "Write a Release's meta-spec from its Interview, or its next versio
 disable-model-invocation: true
 ---
 
-A **meta-spec** is a functional spec that contains a mockup: one HTML document the client reads and tries, kept in Specster as a Spec Version of a Release. Write one for the Release named first in the arguments (`R-n` or its address). Given `US-n` or a User Story's address, propose its Release, or to create one, as the first step says.
+A **meta-spec** is a functional spec holding a mockup of each screen it changes: one HTML document the client reads and tries, kept in Specster as a Spec Version of a Release. Write one for the Release named first in the arguments (`R-n` or its address). Given `US-n` or a User Story's address, propose its Release, or to create one, as the first step says.
 
 Two things call for the meta-spec's next version, changed only where they reach:
 
 - A sentence after the Release is a **change request**.
 - A **group change** is what `specster load` prints last, while the group differs from what the Current Spec Version covers, such as « Le groupe a changé depuis v1 : US-8 ajoutée, US-5 retirée. Ajoutez une version de spec pour qu'elle couvre le groupe actuel. ».
+
+Either gives a version in the format of [`FORMAT.md`](FORMAT.md), even from a Current Spec Version written in an older one: putting it in this format changes its layout, and its content still changes only where they reach. The Spec Versions already sent stay as they are.
 
 Run the CLI as [`../cli.md`](../cli.md) says. What a meta-spec holds, and what Specster's preview allows, is in [`FORMAT.md`](FORMAT.md).
 
@@ -35,9 +37,11 @@ Run the CLI as [`../cli.md`](../cli.md) says. What a meta-spec holds, and what S
 
    When the check leaves nothing to ask, say so, such as « Aucun ajout n'en contredit un autre. »
 
-   Done when every rule, state and mockup detail traces back to the Interview, the change request or the group change, and every contradiction touching a decision this content draws on is settled: by an Entry already there, or by a new one the CLI confirmed with « Ajout enregistré dans l'interview de R-n. »
-4. **Write the draft** to a file in a temporary folder outside the repo (`mktemp -d`), named after the Release, such as `R-2.html`, and open it in the User's browser (`open` on macOS, `xdg-open` on Linux). With a change request or a group change, add its line to the « Versions » section. Done when the draft opens in the browser.
-5. **Get the User's approval**: ask them to try the draft, and correct the file until they approve it. Done when they approve.
+   Then list the screens this content touches, as [`FORMAT.md`](FORMAT.md) defines them, on your own: the User checks the list on the draft, at step 5. Search the codebase for every place that uses what changes, such as a shared component, text or piece of data, and list each screen these places appear on: those a feature is used on, and those it changes as a side effect.
+
+   Done when every rule, state and mockup detail traces back to the Interview, the change request or the group change, the search has covered every place in the code that uses what changes and each screen these places appear on is in the list, and every contradiction touching a decision this content draws on is settled: by an Entry already there, or by a new one the CLI confirmed with « Ajout enregistré dans l'interview de R-n. »
+4. **Write the draft** to a file in a temporary folder outside the repo (`mktemp -d`), named after the Release, such as `R-2.html`, and open it in the User's browser (`open` on macOS, `xdg-open` on Linux). With a change request or a group change, add its line to the « Versions » section. From a Current Spec Version in an older format, that line also names each touched screen that this format brings in, such as « Depuis v1 : US-33 retirée. La page Archives, touchée par effet de bord, a maintenant sa maquette. ». Done when the draft opens in the browser.
+5. **Get the User's approval**: ask them to try the draft, checking on it that « Écrans touchés » lists every screen whose look changes, and correct the file until they approve it. Done when they approve.
 6. **Send it**: `specster spec-version add <R-n> < <draft>`, then delete the temporary folder. Done when the CLI prints « R-n vN ajoutée : c'est la Version courante. » and the folder is gone.
 7. **Update the tickets**, after a group change: in the repo's issue tracker, have each open ticket citing « Meta-spec : R-n » cite the new version instead (check each citation is R-n itself, not R-n0). A closed ticket keeps its citation, as it was built on that version. Done when no open ticket cites an earlier version of it, or none exists yet.
 8. **Report** to the User, in French: the new version, written « R-n vN », which the Release's page in Specster now previews, and the tickets updated, if any.
