@@ -7,7 +7,7 @@ A **screen** is anything a user of the product sees: a page, a dialog, an e-mail
 Its sections, in order:
 
 1. **The header**: the feature's name, the date, and a short introduction saying the need in plain words.
-2. **Écrans touchés**: a sentence saying that each mockup reproduces the whole screen to place it, but that only what its line describes changes, the real app being authoritative for the rest; then one line per touched screen: its name, the User Stories it serves or « par effet de bord de US-n », what changes on it in one sentence, and a link to its mockup. A User Story that changes no screen is named under the list, with a pointer to « Comportement » for its rules. With no screen touched, the section reads « Aucun écran ne change. ».
+2. **Écrans touchés**: one line per touched screen: its name, the User Stories it serves or « par effet de bord de US-n », what changes on it in one sentence, and a link to its mockup. The list opens with a sentence saying that each mockup reproduces the whole screen to place it, but that only what its line describes changes, the real app being authoritative for the rest. A User Story that changes no screen is named under the list, with a pointer to « Comportement » for its rules. With no screen touched, the section reads « Aucun écran ne change. ».
 3. **Essayez**: one interactive mockup per screen a feature of the Release is used on, where only the new features work, each titled with the screen's name and the User Stories it serves. Its caption repeats its line of « Écrans touchés » and says what to try. Controls that belong to the mockup itself, such as « Simuler un échec », sit in a separate box labelled as not part of the feature.
 4. **Autres écrans**: a still mockup of each screen touched as a side effect, with no interaction, in the order of the list, with its line as its caption.
 5. **Comportement**: the rules, one per item, each a sentence the client can check.
@@ -15,7 +15,7 @@ Its sections, in order:
 7. **Hors périmètre**: what the features leave as they are, naming the neighbouring screens where a reader could expect a change, as they show the same data or the same component: those alone, not the whole app.
 8. **Versions**: one line per version, newest first. The first reads « Première version, écrite à partir de l'interview. »; a change request adds « Depuis vN : <what changed> », vN being the version it was made from, and a change of the group names the User Stories, such as « Depuis v1 : US-33 retirée. ». Specster numbers versions itself and never reuses a deleted one's number, so a line names the version it starts from, never its own.
 
-With no screen touched, « Essayez » and « Autres écrans » are left out.
+A section with no screen to show, « Essayez » or « Autres écrans », is left out: with no screen touched, both are.
 
 A mockup reproduces its whole screen in the app's own look (its colours, fonts and components, read from the codebase), as it will be once built, and that alone: no before, and no mark on what changes, which its caption says.
 
