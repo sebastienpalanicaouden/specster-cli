@@ -1,6 +1,6 @@
 # specster-cli
 
-[Specster](https://specster.fr) from the command line, for a terminal or an agent such as Claude Code: link a folder to a Project, group its User Stories in Releases, read and add to a Release's Interview and Spec Versions, give it a Tag, write the Notes of a Release or a User Story, give them their Labels and archive them. A single file with no dependencies, for Node.js 20 or later.
+[Specster](https://specster.fr) from the command line, for a terminal or an agent such as Claude Code: link a folder to a Project, create its User Stories and change their sentences, group them in Releases, read and add to a Release's Interview and Spec Versions, give it a Tag, write the Notes of a Release or a User Story, give them their Labels and archive them. A single file with no dependencies, for Node.js 20 or later.
 
 ## Run it
 
@@ -54,6 +54,8 @@ Keep the token out of commits, and out of conversations with an agent, where it 
 
 ```sh
 specster init <project URL>                # links this folder to the Project, in .specster.json
+specster us create                         # creates a User Story in the Project, with the standard input as its sentence
+specster us edit US-n                      # replaces the User Story's sentence with the standard input
 specster release list                      # prints the Project's Releases, the most recent first
 specster release create "<title>" [US-n…]  # creates a Release in the Project, and adds the User Stories to it
 specster release add R-n US-n…             # adds User Stories to the Release
@@ -76,16 +78,21 @@ specster load US-n [vN]                    # prints the User Story's Release the
 specster brief R-n                         # prints the Release's Brief: its User Stories with their Notes, its own Notes, and what isn't loaded
 ```
 
-`init` takes the Project's address as your browser shows it, such as `https://specster.fr/projets/<id>`, and writes `.specster.json` in the current folder. The other commands then find it in that folder or the nearest one above, as git does, so `R-3` or `US-2` is enough. A command acting on one Release or User Story also takes its address instead, such as `https://specster.fr/projets/<id>/releases/3` or `https://specster.fr/projets/<id>/us/2`, which needs no linked folder. The User Stories that `release create`, `release add` and `release remove` name go by `US-n` alone, and `release create` needs the link.
+`init` takes the Project's address as your browser shows it, such as `https://specster.fr/projets/<id>`, and writes `.specster.json` in the current folder. The other commands then find it in that folder or the nearest one above, as git does, so `R-3` or `US-2` is enough. A command acting on one Release or User Story also takes its address instead, such as `https://specster.fr/projets/<id>/releases/3` or `https://specster.fr/projets/<id>/us/2`, which needs no linked folder. The User Stories that `release create`, `release add` and `release remove` name go by `US-n` alone, and `release create` and `us create` need the link.
 
-`interview add`, `spec-version add`, `note add` and `note edit` read the standard input, for instance from a heredoc, so nothing needs to be saved to a file:
+`us create`, `us edit`, `interview add`, `spec-version add`, `note add` and `note edit` read the standard input, for instance from a heredoc, so nothing needs to be saved to a file, and an apostrophe needs no quoting:
 
 ```sh
+specster us create <<'EOF'
+En tant que rédactrice, je veux publier un article, afin d'être lue.
+EOF
 specster interview add R-2 <<'EOF'
 Question : quel bouton ?
 Réponse : « Copier », après la phrase.
 EOF
 ```
+
+`us create` prints the new User Story's number and its sentence as Specster saved it, such as « US-37 créée : « En tant que rédactrice, je veux publier un article, afin d'être lue. ». », and `us edit` prints « US-37 modifiée. ». As on Specster's pages, the spaces and blank lines around the sentence are taken off and the rest is kept as written, line breaks included; an empty sentence, or one over 500 characters, prints Specster's refusal, such as « La User Story fait 612 caractères, pour 500 au maximum. ». Neither the CLI nor Specster checks the form « En tant que …, je veux …, afin de … »: like the web form, they take any sentence that isn't empty, of 500 characters at most. `us create` puts the User Story in no Release: `release add R-n US-n` does that next. Neither command takes the sentence as an argument, and the CLI neither deletes nor lists User Stories: `load US-n` prints one's sentence. `us edit` may run again without risk; an Archived User Story refuses it, with Specster's message saying what to unarchive, the User Story itself or its Release.
 
 `release list` prints a line per Release, in progress or archived, skipping what it lacks, such as « R-3 · Écrire et publier · archivée · tag v1.2.0 · US-2, US-3, US-5 · merged », with « aucune User Story » for an empty one. `release create` sends two requests: when the User Stories are refused, the Release stays, already announced, and the command exits with 1. `release add` and `release remove` change all the User Stories named or none, and print a line for each, then the warning when the group now differs from what the Current Spec Version covers: « Le groupe a changé depuis v1 : US-8 ajoutée, US-5 retirée. Ajoutez une version de spec pour qu'elle couvre le groupe actuel. ». A User Story is in one Release at most, and leaves it before entering another. `release tag` takes its text as one argument, between quotes when it has spaces, and `""` takes the Tag off. `release add`, `release remove`, `release tag`, `release archive` and `release unarchive` may run again without risk: nothing changes the second time.
 
@@ -137,7 +144,7 @@ A grilling works with what its conversation holds, so the Brief and the grilling
 In each repo whose features you keep in Specster:
 
 1. Run `specster init <project URL>` at its root, and commit `.specster.json`. It holds no secret, and every computer then knows the Project.
-2. Add these lines to its `CLAUDE.md`, so that specs and tickets name the meta-spec they come from, `/implement` loads it, the agent archives a Release once a merge finishes it, with a Note on what delivered it and the « merged » Label on it and on each of its User Stories, and gives it its Tag after a successful deployment (the plugin's commands are run by hand, so the agent runs the CLI itself):
+2. Add these lines to its `CLAUDE.md`, so that specs and tickets name the meta-spec they come from, `/implement` loads it, the agent creates User Stories and changes their sentences, written as « En tant que …, je veux …, afin de … », archives a Release once a merge finishes it, with a Note on what delivered it and the « merged » Label on it and on each of its User Stories, and gives it its Tag after a successful deployment (the plugin's commands are run by hand, so the agent runs the CLI itself):
 
    ````md
    ### Meta-specs
@@ -146,6 +153,7 @@ In each repo whose features you keep in Specster:
 
    - A spec or ticket written from a meta-spec opens with « Meta-spec : R-n vN. Elle fait foi pour l'apparence et le comportement de ce qu'elle change, l'app réelle pour le reste de chaque écran, sauf les exceptions écrites ici ; ses commandes de démonstration ne font pas partie de la feature. », naming the exact version, and lists those exceptions. Each ticket repeats the line, for `/implement` reads the ticket alone.
    - Before implementing a ticket that cites a meta-spec, load that version: `specster load R-n vN`, or `npx --yes github:sebastienpalanicaouden/specster-cli load R-n vN` where `specster` isn't installed. It needs the User's Personal Token in `SPECSTER_TOKEN`; without it, ask the User to set it rather than working from the ticket alone. Older specs and tickets name a User Story instead, which `specster load US-n vN` still reads, through its Release.
+   - To create a User Story in the linked Project, or change its sentence, run `specster us create`, or `specster us edit US-n`, with the sentence on its standard input, through `npx` and with `SPECSTER_TOKEN` as above. Write the sentence as « En tant que …, je veux …, afin de … », when creating as when editing. When the role, the need or the benefit is missing, ask the User for it rather than inventing it; when all three are there, create or edit without asking for confirmation.
    - After merging a PR, archive each Release it delivers, without waiting for the deploy tag. The tickets the PR closed name their Releases (« Meta-spec : R-n vN »). A Release is delivered once its spec and every ticket citing « Meta-spec : R-n » are closed (check each citation is R-n itself, not R-n0); while one of them is open, it stays in progress. For each one delivered, add its delivery Note, give « merged » to it and to each of its User Stories, archive it, and tell the User in one line: `specster note add R-n` with the Note on its standard input, then `specster label add R-n merged`, then `specster label add US-n merged` for each of its User Stories, then `specster release archive R-n`, through `npx` and with `SPECSTER_TOKEN` as above. If a Label can't be given, for instance because its list has no « merged » Label, archive it all the same and say so in that line. Give no other Label unless the User asks. The Note, in French, on this model:
 
      ```
