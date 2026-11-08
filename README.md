@@ -1,6 +1,6 @@
 # specster-cli
 
-[Specster](https://specster.fr) from the command line, for a terminal or an agent such as Claude Code: link a folder to a Project, group its User Stories in Releases, read and add to a Release's Interview and Spec Versions, give it a Tag, write the Notes of a Release or a User Story, give them their Labels and archive them. A single file with no dependencies, for Node.js 20 or later.
+[Specster](https://specster.fr) from the command line, for a terminal or an agent such as Claude Code: link a folder to a Project, create its User Stories and change their sentences, group them in Releases, read and add to a Release's Interview and Spec Versions, give it a Tag, write the Notes of a Release or a User Story, give them their Labels and archive them. A single file with no dependencies, for Node.js 20 or later.
 
 ## Run it
 
@@ -54,6 +54,8 @@ Keep the token out of commits, and out of conversations with an agent, where it 
 
 ```sh
 specster init <project URL>                # links this folder to the Project, in .specster.json
+specster us create                         # creates a User Story in the Project, with the standard input as its sentence
+specster us edit US-n                      # replaces the User Story's sentence with the standard input
 specster release list                      # prints the Project's Releases, the most recent first
 specster release create "<title>" [US-n…]  # creates a Release in the Project, and adds the User Stories to it
 specster release add R-n US-n…             # adds User Stories to the Release
@@ -76,16 +78,21 @@ specster load US-n [vN]                    # prints the User Story's Release the
 specster brief R-n                         # prints the Release's Brief: its User Stories with their Notes, its own Notes, and what isn't loaded
 ```
 
-`init` takes the Project's address as your browser shows it, such as `https://specster.fr/projets/<id>`, and writes `.specster.json` in the current folder. The other commands then find it in that folder or the nearest one above, as git does, so `R-3` or `US-2` is enough. A command acting on one Release or User Story also takes its address instead, such as `https://specster.fr/projets/<id>/releases/3` or `https://specster.fr/projets/<id>/us/2`, which needs no linked folder. The User Stories that `release create`, `release add` and `release remove` name go by `US-n` alone, and `release create` needs the link.
+`init` takes the Project's address as your browser shows it, such as `https://specster.fr/projets/<id>`, and writes `.specster.json` in the current folder. The other commands then find it in that folder or the nearest one above, as git does, so `R-3` or `US-2` is enough. A command acting on one Release or User Story also takes its address instead, such as `https://specster.fr/projets/<id>/releases/3` or `https://specster.fr/projets/<id>/us/2`, which needs no linked folder. The User Stories that `release create`, `release add` and `release remove` name go by `US-n` alone, and `release create` and `us create` need the link.
 
-`interview add`, `spec-version add`, `note add` and `note edit` read the standard input, for instance from a heredoc, so nothing needs to be saved to a file:
+`us create`, `us edit`, `interview add`, `spec-version add`, `note add` and `note edit` read the standard input, for instance from a heredoc, so nothing needs to be saved to a file, and an apostrophe needs no quoting:
 
 ```sh
+specster us create <<'EOF'
+En tant que rédactrice, je veux publier un article, afin d'être lue.
+EOF
 specster interview add R-2 <<'EOF'
 Question : quel bouton ?
 Réponse : « Copier », après la phrase.
 EOF
 ```
+
+`us create` prints the new User Story's number and its sentence as Specster saved it, such as « US-37 créée : « En tant que rédactrice, je veux publier un article, afin d'être lue. ». », and `us edit` prints « US-37 modifiée. ». As on Specster's pages, the spaces and blank lines around the sentence are taken off and the rest is kept as written, line breaks included; an empty sentence, or one over 500 characters, prints Specster's refusal, such as « La User Story fait 612 caractères, pour 500 au maximum. ». Neither the CLI nor Specster checks the form « En tant que …, je veux …, afin de … »: like the web form, they take any sentence that isn't empty, of 500 characters at most. `us create` puts the User Story in no Release: `release add R-n US-n` does that next. Neither command takes the sentence as an argument, and the CLI neither deletes nor lists User Stories: `load US-n` prints one's sentence. `us edit` may run again without risk; an Archived User Story refuses it, with Specster's message saying what to unarchive, the User Story itself or its Release.
 
 `release list` prints a line per Release, in progress or archived, skipping what it lacks, such as « R-3 · Écrire et publier · archivée · tag v1.2.0 · US-2, US-3, US-5 · merged », with « aucune User Story » for an empty one. `release create` sends two requests: when the User Stories are refused, the Release stays, already announced, and the command exits with 1. `release add` and `release remove` change all the User Stories named or none, and print a line for each, then the warning when the group now differs from what the Current Spec Version covers: « Le groupe a changé depuis v1 : US-8 ajoutée, US-5 retirée. Ajoutez une version de spec pour qu'elle couvre le groupe actuel. ». A User Story is in one Release at most, and leaves it before entering another. `release tag` takes its text as one argument, between quotes when it has spaces, and `""` takes the Tag off. `release add`, `release remove`, `release tag`, `release archive` and `release unarchive` may run again without risk: nothing changes the second time.
 

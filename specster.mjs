@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Specster from the command line, for a terminal or an agent: links a folder to a Project, then lists and creates its
-// Releases, changes their groups and Tags, adds to their Interviews and Spec Versions, writes their Notes, archives them
-// and reads them, whole or as a Brief, writes a User Story's Notes, gives it its Labels and archives it, through Specster's
-// API, with the User's Personal Token.
+// Specster from the command line, for a terminal or an agent: links a folder to a Project, then creates its User Stories
+// and changes their sentences, lists and creates its Releases, changes their groups and Tags, adds to their Interviews and
+// Spec Versions, writes their Notes, archives them and reads them, whole or as a Brief, writes a User Story's Notes, gives
+// it its Labels and archives it, through Specster's API, with the User's Personal Token.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -12,6 +12,8 @@ const CONFIG_FILE = ".specster.json";
 
 const USAGE = `Usage :
   specster init <adresse du projet>   relie ce dossier au projet
+  specster us create                  crée une User Story dans le projet, avec l'entrée standard pour phrase
+  specster us edit <US-n>             remplace la phrase de la User Story par l'entrée standard
   specster release list               affiche les Releases du projet, la plus récente d'abord
   specster release create "<titre>" [US-n…]
                                       crée une Release dans le projet, et y ajoute les User Stories
@@ -62,6 +64,8 @@ class UserError extends Error {}
 
 const COMMANDS = {
   init,
+  "us create": createUserStory,
+  "us edit": editUserStory,
   "release list": listReleases,
   "release create": createRelease,
   "release add": addToRelease,
@@ -102,6 +106,31 @@ async function init([address]) {
   const [, url, project] = match;
   writeFileSync(CONFIG_FILE, `${JSON.stringify({ url, project }, null, 2)}\n`);
   console.log(`Ce dossier est relié au projet ${project} de ${url}.`);
+}
+
+// Creates a User Story in the linked Project, in no Release, with what comes on the standard input as its sentence, and
+// says it as Specster saved it. Neither the CLI nor Specster checks its form.
+async function createUserStory(args) {
+  refuseSentenceAsArgument(args);
+  const { url, project } = linkedProject();
+  const created = await api(url, `/api/projets/${project}/us`, { method: "POST", ...(await plainTextInput()) });
+  console.log(`US-${created.number} créée : « ${created.sentence} ».`);
+}
+
+// Replaces the User Story's sentence with what comes on the standard input. Asking again changes nothing.
+async function editUserStory([reference, ...others]) {
+  const userStory = userStoryAt(reference);
+  refuseSentenceAsArgument(others);
+  await api(userStory.url, `${userStory.path}/sentence`, { method: "PUT", ...(await plainTextInput()) });
+  console.log(`${userStory.name} modifiée.`);
+}
+
+// A sentence given as an argument, as `release create` takes its title, would be lost in silence: Specster would refuse
+// the empty standard input as an empty sentence, or a terminal would wait for one.
+function refuseSentenceAsArgument(args) {
+  if (args.length > 0) {
+    throw new UserError(`Donnez la phrase de la User Story sur l'entrée standard, pas en argument.\n\n${USAGE}`);
+  }
 }
 
 // The linked Project's Releases, the most recent first, one line each.
