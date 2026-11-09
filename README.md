@@ -1,6 +1,6 @@
 # specster-cli
 
-[Specster](https://specster.fr) from the command line, for a terminal or an agent such as Claude Code: link a folder to a Project, create its User Stories and change their sentences, group them in Releases, read and add to a Release's Interview and Spec Versions, give it a Tag, write the Notes of a Release or a User Story, give them their Labels and archive them. A single file with no dependencies, for Node.js 20 or later.
+[Specster](https://specster.fr) from the command line, for a terminal or an agent such as Claude Code: link a folder to a Project, create its User Stories and change their sentences, group them in Releases, read and add to a Release's Interview and Spec Versions, give it a Tag, write the Notes of a Release or a User Story, give them their Labels and archive them, and note the Project's tasks, mark them done and link them to its User Stories. A single file with no dependencies, for Node.js 20 or later.
 
 ## Run it
 
@@ -73,6 +73,14 @@ specster label add US-n|R-n <name>…        # gives Labels of its list to the U
 specster label remove US-n|R-n <name>…     # takes Labels off the User Story or the Release
 specster archive US-n                      # archives the User Story, if it is in no Release
 specster unarchive US-n                    # unarchives it, if it is in no Release
+specster task list [--done]                # prints the Project's tasks to do, or those done, in the order of their tab
+specster task add                          # adds a task to the Project, with the standard input as its text; prints its T-n
+specster task edit T-n                     # replaces the task's text with the standard input
+specster task delete T-n                   # deletes the task, with its links to User Stories
+specster task done T-n                     # marks the task done
+specster task undone T-n                   # puts it back to do
+specster task link T-n US-n…               # links the task to the User Stories
+specster task unlink T-n US-n…             # unlinks it from them
 specster load R-n [vN]                     # prints the Release, its User Stories, its Interview and a Spec Version, the Current one by default
 specster load US-n [vN]                    # prints the User Story's Release the same way, or, in none, its sentence and Notes
 specster brief R-n                         # prints the Release's Brief: its User Stories with their Notes, its own Notes, and what isn't loaded
@@ -80,7 +88,7 @@ specster brief R-n                         # prints the Release's Brief: its Use
 
 `init` takes the Project's address as your browser shows it, such as `https://specster.fr/projets/<id>`, and writes `.specster.json` in the current folder. The other commands then find it in that folder or the nearest one above, as git does, so `R-3` or `US-2` is enough. A command acting on one Release or User Story also takes its address instead, such as `https://specster.fr/projets/<id>/releases/3` or `https://specster.fr/projets/<id>/us/2`, which needs no linked folder. The User Stories that `release create`, `release add` and `release remove` name go by `US-n` alone, and `release create` and `us create` need the link.
 
-`us create`, `us edit`, `interview add`, `spec-version add`, `note add` and `note edit` read the standard input, for instance from a heredoc, so nothing needs to be saved to a file, and an apostrophe needs no quoting:
+`us create`, `us edit`, `interview add`, `spec-version add`, `note add`, `note edit`, `task add` and `task edit` read the standard input, for instance from a heredoc, so nothing needs to be saved to a file, and an apostrophe needs no quoting:
 
 ```sh
 specster us create <<'EOF'
@@ -107,6 +115,10 @@ The Brief loads all the Notes, whole and unfiltered, as the CLI can't sort free 
 `label list` prints a Project's two lists apart, under « Labels des User Stories : » and « Labels des Releases : », each line such as « merged · vert », in alphabetical order. The same name in both is two Labels. `label add` and `label remove` choose the list from `US-n` or `R-n`, take one name or more, a name with spaces between quotes, such as `specster label add R-5 bug "À relire"`, recognized whatever their case, and print a line for each Label. They may run again without risk: they then say the User Story or the Release already was as asked. A name that list doesn't have refuses them all and changes nothing, and the message lists its Labels. The CLI creates, renames, recolors and deletes no Label: that is done in Specster, on the Project's « Labels » page or the « Labels des Releases » page.
 
 `archive` and `unarchive` may run again without risk, as above. A User Story in a Release is archived and unarchived with it: both print Specster's refusal, which gives the command to use.
+
+A task, something to do in the Project, goes by `T-n`, in a linked folder only: it has no address of its own. `task list` prints the tasks to do, the most recently added first, or, with `--done`, those done, the most recently done first, as the « Tâches » page's tabs list them. Each is a block of Markdown: « ## T-3 · À faire », or « ## T-3 · Faite le 7 novembre 2026 », then « Ajoutée le 2 novembre 2026 · modifiée le 4 novembre 2026 · User Stories : US-26 · Archivée, US-30 », « · modifiée le … » only once its text has been changed, and each User Story written as its pill on the page, « US-36 · R-15 », « US-26 · Archivée » or « US-35 », or « User Stories : aucune », then its whole text, without the line breaks that end it. The days are Paris's, without the time. Without any, it prints the page's message: « Ce projet n'a pas encore de tâche. », « Aucune tâche à faire. » or « Aucune tâche faite. ».
+
+`task add` prints the new task's number alone, such as « T-8 », and `task edit` « T-8 modifiée. »: the text is kept as written, blank lines and spaces included, under a Note's rules, and an empty one prints Specster's refusal, « Écrivez la tâche. ». Neither takes the text as an argument. `task delete` prints « T-8 supprimée. ». `task done` and `task undone` print « T-8 marquée comme faite. » and « T-8 remise à faire. », `task link T-8 US-5…` and `task unlink T-8 US-5…` a line per User Story, such as « T-8 reliée à US-5. » or « T-8 déliée de US-5. », archived ones included, all of them or none. The four of them may run again without risk: they then say the task already was as asked, such as « T-8 était déjà faite. » or « T-8 n'était pas reliée à US-5. ».
 
 `interview add` and `spec-version add` take a Release: given a User Story, they print Specster's refusal, which names its Release or says how to create one. A Release with no User Story refuses both. An Archived Release is read-only but for its Tag, its Notes and its Labels, and an Archived User Story but for its Notes and its Labels: what they no longer accept prints Specster's refusal.
 

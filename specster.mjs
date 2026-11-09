@@ -2,7 +2,8 @@
 // Specster from the command line, for a terminal or an agent: links a folder to a Project, then creates its User Stories
 // and changes their sentences, lists and creates its Releases, changes their groups and Tags, adds to their Interviews and
 // Spec Versions, writes their Notes, archives them and reads them, whole or as a Brief, writes a User Story's Notes, gives
-// it its Labels and archives it, through Specster's API, with the User's Personal Token.
+// it its Labels and archives it, and lists and writes the Project's tasks, marks them done or back to do and links them
+// to its User Stories, through Specster's API, with the User's Personal Token.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -35,6 +36,14 @@ const USAGE = `Usage :
                                       retire des Labels de la User Story ou de la Release
   specster archive <US-n>             archive la User Story, si elle n'est dans aucune Release
   specster unarchive <US-n>           désarchive la User Story, si elle n'est dans aucune Release
+  specster task list [--done]         affiche les tâches à faire du projet, ou ses tâches faites avec --done
+  specster task add                   crée une tâche dans le projet, avec l'entrée standard pour texte
+  specster task edit <T-n>            remplace le texte de la tâche par l'entrée standard
+  specster task delete <T-n>          supprime la tâche, avec ses liens aux User Stories
+  specster task done <T-n>            marque la tâche comme faite
+  specster task undone <T-n>          remet la tâche à faire
+  specster task link <T-n> <US-n>…    relie la tâche aux User Stories
+  specster task unlink <T-n> <US-n>…  délie la tâche des User Stories
   specster load <R-n> [vN]            affiche la Release, ses User Stories avec leurs notes, son interview et
                                       une version de spec, la version courante si vN n'est pas donnée
   specster load <US-n> [vN]           affiche la Release de la User Story, ou, sans Release, sa phrase et ses notes
@@ -42,10 +51,14 @@ const USAGE = `Usage :
 
 Une User Story se désigne par US-n dans un dossier relié, ou par son adresse.
 Une Release se désigne par R-n dans un dossier relié, ou par son adresse.
+Une tâche se désigne par T-n, dans un dossier relié seulement.
 Le jeton personnel, créé dans « Mon compte », se donne dans la variable SPECSTER_TOKEN.`;
 
 // As Specster's pages show them, such as « 29 octobre 2026 à 15:51 », in Paris time.
 const DATE_FORMAT = new Intl.DateTimeFormat("fr-FR", { dateStyle: "long", timeStyle: "short", timeZone: "Europe/Paris" });
+
+// As the « Tâches » page shows a task's dates, without the time, such as « 9 novembre 2026 », in Paris time.
+const DAY_FORMAT = new Intl.DateTimeFormat("fr-FR", { dateStyle: "long", timeZone: "Europe/Paris" });
 
 // The colors of Labels, in French. A key missing here, from a Specster newer than the CLI, is shown as it is.
 const COLOR_NAMES = new Map([
@@ -83,6 +96,14 @@ const COMMANDS = {
   "label remove": removeLabels,
   archive,
   unarchive,
+  "task list": listTasks,
+  "task add": addTask,
+  "task edit": editTask,
+  "task delete": deleteTask,
+  "task done": markTaskDone,
+  "task undone": markTaskToDo,
+  "task link": linkTask,
+  "task unlink": unlinkTask,
   load,
   brief,
 };
@@ -353,6 +374,127 @@ async function unarchive([reference]) {
   const userStory = userStoryAt(reference);
   const { changed } = await api(userStory.url, `${userStory.path}/archive`, { method: "DELETE" });
   console.log(changed ? `${userStory.name} désarchivée.` : `${userStory.name} n'était pas archivée.`);
+}
+
+// The linked Project's tasks to do, or those done with --done, in the order of their tab on the « Tâches » page: a block of
+// Markdown each, with its whole text, its state and its User Stories. Without any, the page's message.
+async function listTasks(args) {
+  const done = args.length === 1 && args[0] === "--done";
+  if (args.length > 0 && !done) throw new UserError(USAGE);
+  const { url, project } = linkedProject();
+  const { tasks } = await api(url, `/api/projets/${project}/taches`);
+  const listed = tasks.filter(({ doneAt }) => (doneAt !== null) === done);
+  if (listed.length === 0) {
+    const none = done ? "Aucune tâche faite." : "Aucune tâche à faire.";
+    console.log(tasks.length === 0 ? "Ce projet n'a pas encore de tâche." : none);
+    return;
+  }
+  console.log(
+    listed.map((task) => taskBlock(task, { level: 2, userStories: task.userStories.map(userStoryPill) })).join("\n\n"),
+  );
+}
+
+// A task as a block of Markdown, under a heading of the level given: its number and its state, then a line with its
+// dates and, when given, its User Stories as they are written, then its whole text, as typed.
+function taskBlock({ number, text, createdAt, editedAt, doneAt }, { level, userStories }) {
+  const state = doneAt === null ? "À faire" : `Faite le ${DAY_FORMAT.format(new Date(doneAt))}`;
+  const line = [
+    `Ajoutée le ${DAY_FORMAT.format(new Date(createdAt))}`,
+    ...(editedAt === null ? [] : [`modifiée le ${DAY_FORMAT.format(new Date(editedAt))}`]),
+    ...(userStories === undefined ? [] : [`User Stories : ${userStories.join(", ") || "aucune"}`]),
+  ].join(" · ");
+  // Without the line break a heredoc ends with, which would double the blank line before the next task.
+  return `${"#".repeat(level)} T-${number} · ${state}\n${line}\n\n${text.replace(/\n+$/, "")}`;
+}
+
+// A User Story linked to a task, as its pill on the « Tâches » page shows it: « US-26 · Archivée » once archived, « US-36 ·
+// R-15 » in a Release, « US-35 » in none.
+function userStoryPill({ number, release, archivedAt }) {
+  if (archivedAt !== null) return `US-${number} · Archivée`;
+  return release === null ? `US-${number}` : `US-${number} · R-${release}`;
+}
+
+// Adds what comes on the standard input, word for word, as a task to do in the linked Project, and prints its number
+// alone, for an agent to use.
+async function addTask(args) {
+  refuseTaskTextAsArgument(args);
+  const { url, project } = linkedProject();
+  const created = await api(url, `/api/projets/${project}/taches`, { method: "POST", ...(await plainTextInput()) });
+  console.log(`T-${created.number}`);
+}
+
+// Replaces the task's text with what comes on the standard input. Its text unchanged changes nothing.
+async function editTask([reference, ...others]) {
+  const task = taskAt(reference);
+  refuseTaskTextAsArgument(others);
+  await api(task.url, task.path, { method: "PUT", ...(await plainTextInput()) });
+  console.log(`${task.name} modifiée.`);
+}
+
+// A text given as an argument would be lost in silence, as a User Story's sentence would.
+function refuseTaskTextAsArgument(args) {
+  if (args.length > 0) {
+    throw new UserError(`Donnez le texte de la tâche sur l'entrée standard, pas en argument.\n\n${USAGE}`);
+  }
+}
+
+// Deletes the task for good, with its links to User Stories, which stay.
+async function deleteTask(args) {
+  const task = onlyTaskAt(args);
+  await api(task.url, task.path, { method: "DELETE" });
+  console.log(`${task.name} supprimée.`);
+}
+
+// Marks the task done. A program may ask again: a done task keeps the date it was first done.
+async function markTaskDone(args) {
+  const task = onlyTaskAt(args);
+  const { changed } = await api(task.url, `${task.path}/done`, { method: "PUT" });
+  console.log(changed ? `${task.name} marquée comme faite.` : `${task.name} était déjà faite.`);
+}
+
+// Puts the task back to do. Asking again changes nothing.
+async function markTaskToDo(args) {
+  const task = onlyTaskAt(args);
+  const { changed } = await api(task.url, `${task.path}/done`, { method: "DELETE" });
+  console.log(changed ? `${task.name} remise à faire.` : `${task.name} était déjà à faire.`);
+}
+
+// Links the task to the User Stories, archived or not, all or none. Asking again changes nothing.
+async function linkTask([reference, ...references]) {
+  await changeTaskLinks(taskAt(reference), "add", userStoryNumbers(references), (task, userStory, changed) =>
+    changed ? `${task} reliée à ${userStory}.` : `${task} était déjà reliée à ${userStory}.`,
+  );
+}
+
+// Unlinks the task from the User Stories, all or none, without deleting them. Asking again changes nothing.
+async function unlinkTask([reference, ...references]) {
+  await changeTaskLinks(taskAt(reference), "remove", userStoryNumbers(references), (task, userStory, changed) =>
+    changed ? `${task} déliée de ${userStory}.` : `${task} n'était pas reliée à ${userStory}.`,
+  );
+}
+
+// One request for all the User Stories, so that one not found changes nothing for the others. One line for each, in the
+// order the User named them.
+async function changeTaskLinks(task, change, numbers, lineFor) {
+  const { userStories } = await api(task.url, `${task.path}/user-stories`, {
+    method: "PATCH",
+    body: JSON.stringify({ [change]: numbers }),
+    contentType: "application/json",
+  });
+  console.log(userStories.map(({ number, changed }) => lineFor(task.name, `US-${number}`, changed)).join("\n"));
+}
+
+// The task a command names alone: anything after it gets the same refusal, so that no argument is ignored in silence.
+function onlyTaskAt([reference, ...others]) {
+  return taskAt(others.length === 0 ? reference : null);
+}
+
+// Where the API keeps the task the User names, as T-n in a linked folder: a task has no address of its own.
+function taskAt(reference) {
+  const number = /^T-([1-9][0-9]*)$/i.exec(reference ?? "")?.[1];
+  if (!number) throw new UserError(`Désignez la tâche par T-n.\n\n${USAGE}`);
+  const { url, project } = linkedProject();
+  return { name: `T-${number}`, url, path: `/api/projets/${project}/taches/${number}` };
 }
 
 // What an agent reads before working on the Release or the User Story. A User Story in a Release leads to it, as it holds

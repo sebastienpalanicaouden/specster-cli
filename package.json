@@ -1,7 +1,7 @@
 {
   "name": "specster-cli",
   "version": "0.6.0",
-  "description": "Specster from the command line: User Stories created and their sentences changed, Releases with their group, Tag, Interview and Spec Versions, the Notes and Labels of Releases and User Stories, and their archiving, for a terminal or an agent.",
+  "description": "Specster from the command line: User Stories created and their sentences changed, Releases with their group, Tag, Interview and Spec Versions, the Notes and Labels of Releases and User Stories, and their archiving, and the tasks of a Project, done or to do and linked to its User Stories, for a terminal or an agent.",
   "type": "module",
   "bin": {
     "specster": "specster.mjs"
