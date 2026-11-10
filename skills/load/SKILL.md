@@ -6,8 +6,8 @@ disable-model-invocation: true
 
 Load into this conversation, from Specster, what the arguments name, then optionally a version `vN`:
 
-- **`R-n` or a Release's address**: the Release, with its User Stories, their sentences and Notes, the tasks linked to them, its Interview and one of its Spec Versions: the Current Spec Version unless a version is given.
-- **`US-n` or a User Story's address**, as older specs and tickets cite it: the same, for the Release it is in. In no Release, it has only its sentence, its Notes and its tasks, and asking it for a version is refused.
+- **`R-n` or a Release's address**: the Release, with its User Stories, their sentences and Notes, its Interview and one of its Spec Versions: the Current Spec Version unless a version is given.
+- **`US-n` or a User Story's address**, as older specs and tickets cite it: the same, for the Release it is in. In no Release, it has only its sentence and its Notes, and asking it for a version is refused.
 
 Run the CLI as [`../cli.md`](../cli.md) says.
 
