@@ -44,10 +44,12 @@ const USAGE = `Usage :
   specster task undone <T-n>          remet la tâche à faire
   specster task link <T-n> <US-n>…    relie la tâche aux User Stories
   specster task unlink <T-n> <US-n>…  délie la tâche des User Stories
-  specster load <R-n> [vN]            affiche la Release, ses User Stories avec leurs notes, son interview et
-                                      une version de spec, la version courante si vN n'est pas donnée
-  specster load <US-n> [vN]           affiche la Release de la User Story, ou, sans Release, sa phrase et ses notes
-  specster brief <R-n>                affiche la Release, ses User Stories avec leurs notes, et ses notes
+  specster load <R-n> [vN]            affiche la Release, ses User Stories avec leurs notes et leurs tâches,
+                                      son interview et une version de spec, la courante si vN n'est pas donnée
+  specster load <US-n> [vN]           affiche la Release de la User Story, ou, sans Release, sa phrase, ses
+                                      notes et ses tâches
+  specster brief <R-n>                affiche la Release, ses User Stories avec leurs notes et leurs tâches,
+                                      et ses notes
 
 Une User Story se désigne par US-n dans un dossier relié, ou par son adresse.
 Une Release se désigne par R-n dans un dossier relié, ou par son adresse.
@@ -511,10 +513,8 @@ async function load([reference, version]) {
 // group differs from what the Current Spec Version covers. The Notes it shows are those of its User Stories: its own are
 // for note list.
 async function loadedRelease(release, asked) {
-  const { number, title, tag, archivedAt, labels, userStories, currentSpecVersion, specVersions, groupChange } = await api(
-    release.url,
-    release.path,
-  );
+  const { number, title, tag, archivedAt, labels, userStories, tasks, currentSpecVersion, specVersions, groupChange } =
+    await api(release.url, release.path);
   const shown = asked ?? currentSpecVersion;
   const covered = specVersions.find((specVersion) => specVersion.number === shown)?.covers;
   if (shown !== null && !covered) throw new UserError(`${release.name} n'a pas de v${shown}.`);
@@ -537,6 +537,7 @@ async function loadedRelease(release, asked) {
     `Tag : ${tag ?? "aucun"}`,
     ...labelsLine(labels),
     ...userStoriesSection(userStories),
+    ...linkedTasksSection(tasks),
     "## Interview",
     ...interview,
     ...specVersion,
@@ -546,7 +547,7 @@ async function loadedRelease(release, asked) {
 
 // The Release of the User Story as `load` prints it, or, without one, all that the User Story has: no Spec Version.
 async function loadedUserStory(userStory, asked) {
-  const { number, sentence, archivedAt, labels, release } = await api(userStory.url, userStory.path);
+  const { number, sentence, archivedAt, labels, release, tasks } = await api(userStory.url, userStory.path);
   if (release !== null) {
     const releasePath = userStory.path.replace(/\/us\/[0-9]+$/, `/releases/${release}`);
     const loaded = await loadedRelease({ name: `R-${release}`, url: userStory.url, path: releasePath }, asked);
@@ -560,6 +561,7 @@ async function loadedUserStory(userStory, asked) {
     ...labelsLine(labels),
     "Aucune Release.",
     ...notes.map(noteLine),
+    ...linkedTasksSection(tasks),
   ].join("\n\n");
 }
 
@@ -568,7 +570,7 @@ async function loadedUserStory(userStory, asked) {
 async function brief([reference, ...others]) {
   // Anything after the Release gets the same refusal, so that no argument is ignored in silence.
   const release = releaseAt(others.length === 0 ? reference : null);
-  const [{ number, title, archivedAt, userStories, currentSpecVersion }, { notes }, { entries }] = await Promise.all([
+  const [{ number, title, archivedAt, userStories, tasks, currentSpecVersion }, { notes }, { entries }] = await Promise.all([
     api(release.url, release.path),
     api(release.url, `${release.path}/notes`),
     api(release.url, `${release.path}/interview`),
@@ -577,6 +579,7 @@ async function brief([reference, ...others]) {
     [
       ...releaseHeading({ number, title, archivedAt }),
       ...userStoriesSection(userStories),
+      ...linkedTasksSection(tasks),
       "## Notes de la Release",
       ...(notes.length > 0 ? notes.map(noteLine) : ["Cette Release n'a pas encore de note."]),
       ...notLoadedLine(entries.length, currentSpecVersion),
@@ -611,6 +614,17 @@ function userStoriesSection(userStories) {
           ].join("\n"),
         );
   return ["## User Stories", ...group];
+}
+
+// The tasks linked to the User Stories, as `load` and `brief` print them after them: each once, as `task list` prints it,
+// a level lower. A Release's say which of its User Stories link them; a User Story's alone come without. Left out for a
+// Specster older than the tasks, whose answer has none.
+function linkedTasksSection(tasks) {
+  if (tasks === undefined) return [];
+  const blocks = tasks.map((task) =>
+    taskBlock(task, { level: 3, userStories: task.userStories?.map((userStory) => `US-${userStory}`) }),
+  );
+  return ["## Tâches reliées", ...(blocks.length > 0 ? blocks : ["Aucune tâche reliée."])];
 }
 
 // Null while in progress.
