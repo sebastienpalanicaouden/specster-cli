@@ -45,9 +45,9 @@ const USAGE = `Usage :
   specster task link <T-n> <US-n>…    relie la tâche aux User Stories
   specster task unlink <T-n> <US-n>…  délie la tâche des User Stories
   specster load <R-n> [vN]            affiche la Release, ses User Stories avec leurs notes et leurs tâches,
-                                      son interview et une version de spec, la courante si vN n'est pas donnée
-  specster load <US-n> [vN]           affiche la Release de la User Story, ou, sans Release, sa phrase, ses
-                                      notes et ses tâches
+                                      son interview et une version de spec, la version courante si vN n'est pas donnée
+  specster load <US-n> [vN]           affiche la Release de la User Story, ou, sans Release, sa phrase, ses notes
+                                      et ses tâches
   specster brief <R-n>                affiche la Release, ses User Stories avec leurs notes et leurs tâches,
                                       et ses notes
 
@@ -537,7 +537,7 @@ async function loadedRelease(release, asked) {
     `Tag : ${tag ?? "aucun"}`,
     ...labelsLine(labels),
     ...userStoriesSection(userStories),
-    ...linkedTasksSection(tasks),
+    ...linkedTasksSection(tasks, { ofRelease: true }),
     "## Interview",
     ...interview,
     ...specVersion,
@@ -561,7 +561,7 @@ async function loadedUserStory(userStory, asked) {
     ...labelsLine(labels),
     "Aucune Release.",
     ...notes.map(noteLine),
-    ...linkedTasksSection(tasks),
+    ...linkedTasksSection(tasks, { ofRelease: false }),
   ].join("\n\n");
 }
 
@@ -579,7 +579,7 @@ async function brief([reference, ...others]) {
     [
       ...releaseHeading({ number, title, archivedAt }),
       ...userStoriesSection(userStories),
-      ...linkedTasksSection(tasks),
+      ...linkedTasksSection(tasks, { ofRelease: true }),
       "## Notes de la Release",
       ...(notes.length > 0 ? notes.map(noteLine) : ["Cette Release n'a pas encore de note."]),
       ...notLoadedLine(entries.length, currentSpecVersion),
@@ -617,13 +617,14 @@ function userStoriesSection(userStories) {
 }
 
 // The tasks linked to the User Stories, as `load` and `brief` print them after them: each once, as `task list` prints it,
-// a level lower. A Release's say which of its User Stories link them; a User Story's alone come without. Left out for a
-// Specster older than the tasks, whose answer has none.
-function linkedTasksSection(tasks) {
+// a level lower. A Release's, `ofRelease`, say which of its User Stories link them; a User Story's alone come without.
+// Left out for a Specster older than the tasks, whose answer has none.
+function linkedTasksSection(tasks, { ofRelease }) {
   if (tasks === undefined) return [];
-  const blocks = tasks.map((task) =>
-    taskBlock(task, { level: 3, userStories: task.userStories?.map((userStory) => `US-${userStory}`) }),
-  );
+  const blocks = tasks.map((task) => {
+    const userStories = ofRelease ? task.userStories.map((userStory) => `US-${userStory}`) : undefined;
+    return taskBlock(task, { level: 3, userStories });
+  });
   return ["## Tâches reliées", ...(blocks.length > 0 ? blocks : ["Aucune tâche reliée."])];
 }
 
