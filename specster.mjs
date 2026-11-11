@@ -3,8 +3,8 @@
 // and changes their sentences, lists and creates its Releases, changes their groups and Tags, adds to their Interviews and
 // Spec Versions, writes their Notes, archives them and reads them, whole or as a Brief, writes a User Story's Notes, gives
 // it its Labels and archives it, lists and writes the Project's Tasks, marks them done or back to do and links them
-// to its User Stories, and lists, reads, creates and changes the Project's Sheets, through Specster's API, with the
-// User's Personal Token.
+// to its User Stories, and lists, reads, creates and changes the Project's Sheets and links them to its Tasks and to its
+// User Stories, through Specster's API, with the User's Personal Token.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -51,6 +51,10 @@ const USAGE = `Usage :
                                       crée une fiche dans le projet, avec l'entrée standard, du HTML, pour contenu
   specster sheet edit <F-n> [--title "<titre>"]
                                       change le titre de la fiche, remplace son HTML par l'entrée standard, ou les deux
+  specster sheet link <F-n> <T-n|US-n>…
+                                      relie la fiche aux tâches et aux User Stories
+  specster sheet unlink <F-n> <T-n|US-n>…
+                                      délie la fiche des tâches et des User Stories
   specster load <R-n> [vN]            affiche la Release, ses User Stories avec leurs notes et leurs tâches,
                                       son interview et une version de spec, la version courante si vN n'est pas donnée
   specster load <US-n> [vN]           affiche la Release de la User Story, ou, sans Release, sa phrase, ses notes
@@ -121,6 +125,8 @@ const COMMANDS = {
   "sheet load": loadSheet,
   "sheet create": createSheet,
   "sheet edit": editSheet,
+  "sheet link": linkSheet,
+  "sheet unlink": unlinkSheet,
   load,
   brief,
 };
@@ -394,7 +400,8 @@ async function unarchive([reference]) {
 }
 
 // The linked Project's Tasks to do, or those done with --done, in the order of their tab on the « Tâches » page: a block of
-// Markdown each, with its whole text, its state and its User Stories. Without any, the page's message.
+// Markdown each, with its whole text, its state, its User Stories and, when it has some, its Sheets. Without any, the
+// page's message.
 async function listTasks(args) {
   const done = args.length === 1 && args[0] === "--done";
   if (args.length > 0 && !done) throw new UserError(USAGE);
@@ -407,18 +414,29 @@ async function listTasks(args) {
     return;
   }
   console.log(
-    listed.map((task) => taskBlock(task, { level: 2, userStories: task.userStories.map(userStoryPill) })).join("\n\n"),
+    listed
+      .map((task) =>
+        // A Specster older than the Sheets gives none.
+        taskBlock(task, {
+          level: 2,
+          userStories: task.userStories.map(userStoryPill),
+          sheets: (task.sheets ?? []).map(sheetPill),
+        }),
+      )
+      .join("\n\n"),
   );
 }
 
 // A Task as a block of Markdown, under a heading of the level given: its number and its state, then a line with its
-// dates and, when given, its User Stories as they are written, then its whole text, as typed.
-function taskBlock({ number, text, createdAt, editedAt, doneAt }, { level, userStories }) {
+// dates and, when given, its User Stories as they are written, and its Sheets when some are given, then its whole
+// text, as typed.
+function taskBlock({ number, text, createdAt, editedAt, doneAt }, { level, userStories, sheets = [] }) {
   const state = doneAt === null ? "À faire" : `Faite le ${DAY_FORMAT.format(new Date(doneAt))}`;
   const line = [
     `Ajoutée le ${DAY_FORMAT.format(new Date(createdAt))}`,
     ...(editedAt === null ? [] : [`modifiée le ${DAY_FORMAT.format(new Date(editedAt))}`]),
     ...(userStories === undefined ? [] : [`User Stories : ${userStories.join(", ") || "aucune"}`]),
+    ...(sheets.length === 0 ? [] : [`Fiches : ${sheets.join(", ")}`]),
   ].join(" · ");
   // Without the line break a heredoc ends with, which would double the blank line before the next Task.
   return `${"#".repeat(level)} T-${number} · ${state}\n${line}\n\n${text.replace(/\n+$/, "")}`;
@@ -429,6 +447,11 @@ function taskBlock({ number, text, createdAt, editedAt, doneAt }, { level, userS
 function userStoryPill({ number, release, archivedAt }) {
   if (archivedAt !== null) return `US-${number} · Archivée`;
   return release === null ? `US-${number}` : `US-${number} · R-${release}`;
+}
+
+// A Sheet linked to a Task, as its pill on the « Tâches » page shows it: « F-5 · Archivée » once archived, « F-3 » until then.
+function sheetPill({ number, archivedAt }) {
+  return archivedAt === null ? `F-${number}` : `F-${number} · Archivée`;
 }
 
 // Adds what comes on the standard input, word for word, as a Task to do in the linked Project, and prints its number
@@ -584,6 +607,46 @@ async function editSheet(args) {
     ...(html.length > 0 && { body: html, contentType: HTML }),
   });
   console.log(`${sheet.name} modifiée.`);
+}
+
+// Links the Sheet, archived or not, to the Tasks and the User Stories, whatever their state, all or none. Asking again
+// changes nothing.
+async function linkSheet([reference, ...references]) {
+  await changeSheetLinks(sheetAt(reference), "add", references, (sheet, linked, changed) =>
+    changed ? `${sheet} reliée à ${linked}.` : `${sheet} était déjà reliée à ${linked}.`,
+  );
+}
+
+// Unlinks the Sheet from the Tasks and the User Stories, all or none, without deleting them. Asking again changes nothing.
+async function unlinkSheet([reference, ...references]) {
+  await changeSheetLinks(sheetAt(reference), "remove", references, (sheet, linked, changed) =>
+    changed ? `${sheet} déliée de ${linked}.` : `${sheet} n'était pas reliée à ${linked}.`,
+  );
+}
+
+// One request for all the Tasks and the User Stories, so that one not found changes nothing for the others. One line for
+// each, in the order the User named them, and once for one named twice.
+async function changeSheetLinks(sheet, change, references, lineFor) {
+  // All of them by T-n or US-n: the Sheet says which Project.
+  const named = references.map((reference) => /^(T|US)-([1-9][0-9]*)$/i.exec(reference));
+  if (named.length === 0 || named.includes(null)) {
+    throw new UserError(`Désignez les tâches et les User Stories par T-n ou US-n.\n\n${USAGE}`);
+  }
+  const numbers = { tasks: [], userStories: [] };
+  for (const [, prefix, number] of named) {
+    numbers[prefix.toUpperCase() === "T" ? "tasks" : "userStories"].push(Number(number));
+  }
+  const { tasks, userStories } = await api(sheet.url, `${sheet.path}/liens`, {
+    method: "PATCH",
+    body: JSON.stringify({ [change]: numbers }),
+    contentType: "application/json",
+  });
+  const changed = new Map([
+    ...tasks.map((task) => [`T-${task.number}`, task.changed]),
+    ...userStories.map((userStory) => [`US-${userStory.number}`, userStory.changed]),
+  ]);
+  const names = new Set(named.map(([, prefix, number]) => `${prefix.toUpperCase()}-${number}`));
+  console.log([...names].map((name) => lineFor(sheet.name, name, changed.get(name))).join("\n"));
 }
 
 // The title --title gives, even empty, which Specster then refuses, and the other arguments. Without the option, or
