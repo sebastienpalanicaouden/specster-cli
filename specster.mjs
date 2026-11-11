@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Specster from the command line, for a terminal or an agent: links a folder to a Project, and writes the agent's rule on
-// its Sheets in the folder's CLAUDE.md, then creates its User Stories and changes their sentences, lists and creates its
+// Specster from the command line, for a terminal or an agent: links a folder to a Project, and writes the agent's rules
+// on its meta-specs and on its Sheets in the folder's CLAUDE.md, then creates its User Stories and changes their sentences, lists and creates its
 // Releases, changes their groups and Tags, adds to their Interviews and Spec Versions, writes their Notes, archives them
 // and reads them, whole or as a Brief, writes a User Story's Notes, gives it its Labels and archives it, lists and writes
 // the Project's Tasks, marks them done or back to do and links them to its User Stories, and lists, reads, creates and
@@ -14,7 +14,8 @@ import path from "node:path";
 const CONFIG_FILE = ".specster.json";
 
 const USAGE = `Usage :
-  specster init <adresse du projet>   relie ce dossier au projet, et écrit la section « Fiches » de son CLAUDE.md
+  specster init <adresse du projet>   relie ce dossier au projet, et écrit les sections « Meta-specs » et « Fiches »
+                                      de son CLAUDE.md
   specster us create                  crée une User Story dans le projet, avec l'entrée standard pour phrase
   specster us edit <US-n>             remplace la phrase de la User Story par l'entrée standard
   specster release list               affiche les Releases du projet, la plus récente d'abord
@@ -75,9 +76,37 @@ const DATE_FORMAT = new Intl.DateTimeFormat("fr-FR", { dateStyle: "long", timeSt
 // As the « Tâches » page shows a Task's dates, without the time, such as « 9 novembre 2026 », in Paris time.
 const DAY_FORMAT = new Intl.DateTimeFormat("fr-FR", { dateStyle: "long", timeZone: "Europe/Paris" });
 
-// The agent's instructions, in the folder `init` links, and the section it writes there: when an agent creates, changes,
-// reads and links a Sheet. A CLAUDE.md that already has a section under this heading keeps it, whatever it says.
+// The agent's instructions, in the folder `init` links, and the two sections it writes there. A CLAUDE.md that already
+// has a section under one of these headings keeps it, whatever it says.
 const INSTRUCTIONS_FILE = "CLAUDE.md";
+
+// How specs and tickets cite a meta-spec, how an agent loads it, creates User Stories, notes Tasks, archives a Release
+// once delivered and gives it its Tag: word for word what the README gave to paste by hand.
+const META_SPECS_HEADING = /^### Meta-specs[ \t]*$/m;
+const META_SPECS_SECTION = [
+  "### Meta-specs",
+  "",
+  "A meta-spec is the Spec Version, in Specster, that specifies a Release: a functional spec holding a mockup of each screen it changes. This repo is linked to its Specster Project by `.specster.json`, so `R-n` names a Release there and `US-n` a User Story.",
+  "",
+  "- A spec or ticket written from a meta-spec opens with « Meta-spec : R-n vN. Elle fait foi pour l'apparence et le comportement de ce qu'elle change, l'app réelle pour le reste de chaque écran, sauf les exceptions écrites ici ; ses commandes de démonstration ne font pas partie de la feature. », naming the exact version, and lists those exceptions. Each ticket repeats the line, for `/implement` reads the ticket alone.",
+  "- Before implementing a ticket that cites a meta-spec, load that version: `specster load R-n vN`, or `npx --yes github:sebastienpalanicaouden/specster-cli load R-n vN` where `specster` isn't installed. It needs the User's Personal Token in `SPECSTER_TOKEN`; without it, ask the User to set it rather than working from the ticket alone. Older specs and tickets name a User Story instead, which `specster load US-n vN` still reads, through its Release.",
+  "- To create a User Story in the linked Project, or change its sentence, run `specster us create`, or `specster us edit US-n`, with the sentence on its standard input, through `npx` and with `SPECSTER_TOKEN` as above. Write the sentence as « En tant que …, je veux …, afin de … », when creating as when editing. When the role, the need or the benefit is missing, ask the User for it rather than inventing it; when all three are there, create or edit without asking for confirmation.",
+  "- To read the Tasks of the linked Project, run `specster task list`, or `specster task list --done` for those done, through `npx` and with `SPECSTER_TOKEN` as above. When the User asks you to note a Task, add it at once with `specster task add`, its text on its standard input. When, while working, you notice something to do outside your current work, propose it in one line, such as « Ajouter la tâche : … ? », and add it only once the User says yes: unlike a User Story, a Task is never added unasked. When you create a User Story from a Task, link them on your own with `specster task link T-n US-n`. Change a Task's text, delete it, mark it done or back to do (`specster task edit T-n`, `task delete T-n`, `task done T-n`, `task undone T-n`) only when the User asks, never on your own.",
+  "- After merging a PR, archive each Release it delivers, without waiting for the deploy tag. The tickets the PR closed name their Releases (« Meta-spec : R-n vN »). A Release is delivered once its spec and every ticket citing « Meta-spec : R-n » are closed (check each citation is R-n itself, not R-n0); while one of them is open, it stays in progress. For each one delivered, add its delivery Note, give « merged » to it and to each of its User Stories, archive it, and tell the User in one line: `specster note add R-n` with the Note on its standard input, then `specster label add R-n merged`, then `specster label add US-n merged` for each of its User Stories, then `specster release archive R-n`, through `npx` and with `SPECSTER_TOKEN` as above. If a Label can't be given, for instance because its list has no « merged » Label, archive it all the same and say so in that line. Give no other Label unless the User asks. The Note, in French, on this model:",
+  "",
+  "  ```",
+  "  Livrée par la PR #52 (https://github.com/…/pull/52), squash-mergée en 9b1c2e4, d'après la meta-spec R-3 v2.",
+  "  User Stories : US-2, US-3, US-5.",
+  "  Spec : #49. Tickets : #50, #51.",
+  "  Écarts avec la meta-spec : aucun.",
+  "  Reste à faire : rien.",
+  "  ```",
+  "",
+  "  Dates may be added where they help; the Tag stays out, as it comes after the deployment. A Note to correct is read with `specster note list R-n` and replaced with `specster note edit R-n <N>`, its number.",
+  "- After a successful deployment, run `specster release tag R-n vX.Y.Z` for each Archived Release with no Tag that has « merged », whatever its case: `specster release list` shows them. A canceled Release has no « merged », so it stays without a Tag.",
+].join("\n");
+
+// When an agent creates, changes, reads and links a Sheet.
 const SHEETS_HEADING = /^### Fiches[ \t]*$/m;
 const SHEETS_SECTION = [
   "### Fiches",
@@ -160,33 +189,50 @@ try {
   process.exitCode = 1;
 }
 
-// Writes the folder's link to the Project whose address the User copied from their browser, and the « Fiches » section of
-// its CLAUDE.md, unless it is already there.
+// Writes the folder's link to the Project whose address the User copied from their browser, and the « Meta-specs » and
+// « Fiches » sections of its CLAUDE.md, each unless it is already there.
 async function init([address]) {
   const match = /^(https?:\/\/[^/]+)\/projets\/([0-9a-f-]{36})(?:\/|$)/i.exec(address ?? "");
   if (!match) throw new UserError(`Donnez l'adresse du projet, copiée dans le navigateur.\n\n${USAGE}`);
   const [, url, project] = match;
   writeFileSync(CONFIG_FILE, `${JSON.stringify({ url, project }, null, 2)}\n`);
   console.log(`Ce dossier est relié au projet ${project} de ${url}.`);
-  if (writeSheetsSection()) console.log(`La section « Fiches » est ajoutée à ${INSTRUCTIONS_FILE}.`);
+  for (const name of writeInstructionSections()) {
+    console.log(`La section « ${name} » est ajoutée à ${INSTRUCTIONS_FILE}.`);
+  }
 }
 
-// Adds the « Fiches » section to the folder's CLAUDE.md, created if missing: right after its « Meta-specs » section, that
-// is before the next heading of that level or above, or at its end without one. The rest of the file stays byte for byte,
-// and so does all of it when it already has a « Fiches » section: says whether it wrote.
-function writeSheetsSection() {
-  const instructions = existsSync(INSTRUCTIONS_FILE) ? readFileSync(INSTRUCTIONS_FILE, "utf8") : "";
-  if (SHEETS_HEADING.test(instructions)) return false;
-  const metaSpecs = /^### Meta-specs[ \t]*$/m.exec(instructions);
-  const afterHeading = metaSpecs ? metaSpecs.index + metaSpecs[0].length : instructions.length;
-  const nextHeading = instructions.slice(afterHeading).search(/^#{1,3} /m);
-  const at = nextHeading === -1 ? instructions.length : afterHeading + nextHeading;
+// Adds to the folder's CLAUDE.md, created if missing, each of the two sections whose heading it lacks: « Meta-specs » at
+// its end, as a User pasting it would, then « Fiches » right after the « Meta-specs » section, that is before the next
+// heading of that level or above, or at the end without one. The rest of the file stays byte for byte, and so does all
+// of it when it has both headings. Gives the names of the sections it wrote.
+function writeInstructionSections() {
+  const before = existsSync(INSTRUCTIONS_FILE) ? readFileSync(INSTRUCTIONS_FILE, "utf8") : "";
+  let instructions = before;
+  const written = [];
+  if (!META_SPECS_HEADING.test(instructions)) {
+    instructions = withSection(instructions, instructions.length, META_SPECS_SECTION);
+    written.push("Meta-specs");
+  }
+  if (!SHEETS_HEADING.test(instructions)) {
+    const metaSpecs = META_SPECS_HEADING.exec(instructions);
+    const afterHeading = metaSpecs.index + metaSpecs[0].length;
+    const nextHeading = instructions.slice(afterHeading).search(/^#{1,3} /m);
+    const at = nextHeading === -1 ? instructions.length : afterHeading + nextHeading;
+    instructions = withSection(instructions, at, SHEETS_SECTION);
+    written.push("Fiches");
+  }
+  if (instructions !== before) writeFileSync(INSTRUCTIONS_FILE, instructions);
+  return written;
+}
+
+// The instructions with the section put in at this place, a blank line parting it from what comes before it, and from
+// what follows.
+function withSection(instructions, at, section) {
   const before = instructions.slice(0, at);
-  // A blank line parts the section from what comes before it, and from what follows.
   const gap = before === "" || before.endsWith("\n\n") ? "" : before.endsWith("\n") ? "\n" : "\n\n";
   const after = instructions.slice(at);
-  writeFileSync(INSTRUCTIONS_FILE, `${before}${gap}${SHEETS_SECTION}\n${after === "" ? "" : `\n${after}`}`);
-  return true;
+  return `${before}${gap}${section}\n${after === "" ? "" : `\n${after}`}`;
 }
 
 // Creates a User Story in the linked Project, in no Release, with what comes on the standard input as its sentence, and
