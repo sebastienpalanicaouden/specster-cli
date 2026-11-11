@@ -53,7 +53,7 @@ Keep the token out of commits, and out of conversations with an agent, where it 
 ## Commands
 
 ```sh
-specster init <project URL>                # links this folder to the Project, in .specster.json
+specster init <project URL>                # links this folder to the Project, in .specster.json, and writes « Fiches » in CLAUDE.md
 specster us create                         # creates a User Story in the Project, with the standard input as its sentence
 specster us edit US-n                      # replaces the User Story's sentence with the standard input
 specster release list                      # prints the Project's Releases, the most recent first
@@ -92,7 +92,7 @@ specster load US-n [vN]                    # prints the User Story's Release the
 specster brief R-n                         # prints the Release's Brief: its User Stories with their Notes and Tasks, its own Notes, and what isn't loaded
 ```
 
-`init` takes the Project's address as your browser shows it, such as `https://specster.fr/projets/<id>`, and writes `.specster.json` in the current folder. The other commands then find it in that folder or the nearest one above, as git does, so `R-3` or `US-2` is enough. A command acting on one Release or User Story also takes its address instead, such as `https://specster.fr/projets/<id>/releases/3` or `https://specster.fr/projets/<id>/us/2`, which needs no linked folder. The User Stories that `release create`, `release add` and `release remove` name go by `US-n` alone, and `release create` and `us create` need the link.
+`init` takes the Project's address as your browser shows it, such as `https://specster.fr/projets/<id>`, and writes `.specster.json` in the current folder. It also writes the « Fiches » section of that folder's `CLAUDE.md`, the agent's rule on Sheets, as « Link a repo » says. The other commands then find it in that folder or the nearest one above, as git does, so `R-3` or `US-2` is enough. A command acting on one Release or User Story also takes its address instead, such as `https://specster.fr/projets/<id>/releases/3` or `https://specster.fr/projets/<id>/us/2`, which needs no linked folder. The User Stories that `release create`, `release add` and `release remove` name go by `US-n` alone, and `release create` and `us create` need the link.
 
 `us create`, `us edit`, `interview add`, `spec-version add`, `note add`, `note edit`, `task add`, `task edit`, `sheet create` and `sheet edit` read the standard input, for instance from a heredoc, so nothing needs to be saved to a file, and an apostrophe needs no quoting:
 
@@ -169,7 +169,7 @@ A grilling works with what its conversation holds, so the Brief and the grilling
 
 In each repo whose features you keep in Specster:
 
-1. Run `specster init <project URL>` at its root, and commit `.specster.json`. It holds no secret, and every computer then knows the Project.
+1. Run `specster init <project URL>` at its root, and commit `.specster.json`. It holds no secret, and every computer then knows the Project. `init` also writes a section « ### Fiches » in the `CLAUDE.md` of that folder, to commit too, and prints « La section « Fiches » est ajoutée à CLAUDE.md. »: it says when the agent creates a Sheet or changes one, at your request or once you agree to its « Enregistrer une Fiche : … ? », that it asks you before each replacement of a Sheet's HTML, as the old one is lost, when it reads one, that it links on its own the Tasks and the User Stories it draws from one, and that marking a Sheet as a Favorite, archiving and deleting it stay yours. The section goes right after « ### Meta-specs », or at the end of a `CLAUDE.md` without one, which `init` creates if missing; the rest of the file stays as it is. A `CLAUDE.md` that already has a « ### Fiches » heading is left alone, whatever its section says, so `init` can be run again, and it is how a repo linked before v0.8.0 gets the section.
 2. Add these lines to its `CLAUDE.md`, so that specs and tickets name the meta-spec they come from, `/implement` loads it, the agent creates User Stories and changes their sentences, written as « En tant que …, je veux …, afin de … », notes Tasks when you ask or once you agree, and links each Task to the User Stories it draws from it, archives a Release once a merge finishes it, with a Note on what delivered it and the « merged » Label on it and on each of its User Stories, and gives it its Tag after a successful deployment (the plugin's commands are run by hand, so the agent runs the CLI itself):
 
    ````md

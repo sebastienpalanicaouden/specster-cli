@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-// Specster from the command line, for a terminal or an agent: links a folder to a Project, then creates its User Stories
-// and changes their sentences, lists and creates its Releases, changes their groups and Tags, adds to their Interviews and
-// Spec Versions, writes their Notes, archives them and reads them, whole or as a Brief, writes a User Story's Notes, gives
-// it its Labels and archives it, lists and writes the Project's Tasks, marks them done or back to do and links them
-// to its User Stories, and lists, reads, creates and changes the Project's Sheets and links them to its Tasks and to its
-// User Stories, through Specster's API, with the User's Personal Token.
+// Specster from the command line, for a terminal or an agent: links a folder to a Project, and writes the agent's rule on
+// its Sheets in the folder's CLAUDE.md, then creates its User Stories and changes their sentences, lists and creates its
+// Releases, changes their groups and Tags, adds to their Interviews and Spec Versions, writes their Notes, archives them
+// and reads them, whole or as a Brief, writes a User Story's Notes, gives it its Labels and archives it, lists and writes
+// the Project's Tasks, marks them done or back to do and links them to its User Stories, and lists, reads, creates and
+// changes the Project's Sheets and links them to its Tasks and to its User Stories, through Specster's API, with the
+// User's Personal Token.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -13,7 +14,7 @@ import path from "node:path";
 const CONFIG_FILE = ".specster.json";
 
 const USAGE = `Usage :
-  specster init <adresse du projet>   relie ce dossier au projet
+  specster init <adresse du projet>   relie ce dossier au projet, et écrit la section « Fiches » de son CLAUDE.md
   specster us create                  crée une User Story dans le projet, avec l'entrée standard pour phrase
   specster us edit <US-n>             remplace la phrase de la User Story par l'entrée standard
   specster release list               affiche les Releases du projet, la plus récente d'abord
@@ -73,6 +74,22 @@ const DATE_FORMAT = new Intl.DateTimeFormat("fr-FR", { dateStyle: "long", timeSt
 
 // As the « Tâches » page shows a Task's dates, without the time, such as « 9 novembre 2026 », in Paris time.
 const DAY_FORMAT = new Intl.DateTimeFormat("fr-FR", { dateStyle: "long", timeZone: "Europe/Paris" });
+
+// The agent's instructions, in the folder `init` links, and the section it writes there: when an agent creates, changes,
+// reads and links a Sheet. A CLAUDE.md that already has a section under this heading keeps it, whatever it says.
+const INSTRUCTIONS_FILE = "CLAUDE.md";
+const SHEETS_HEADING = /^### Fiches[ \t]*$/m;
+const SHEETS_SECTION = [
+  "### Fiches",
+  "",
+  "A Sheet, « Fiche » on screen, is a title and an HTML document that the linked Specster Project keeps outside any Release, such as an audit or a research; `F-n` names one there. Its commands are `specster sheet …`, or `npx --yes github:sebastienpalanicaouden/specster-cli sheet …` where `specster` isn't installed, with the User's Personal Token in `SPECSTER_TOKEN`; without it, ask the User to set it.",
+  "",
+  "- Create a Sheet, or change one, when the User asks: `specster sheet create --title \"<title>\"`, its HTML on the standard input, and `specster sheet edit F-n`, with `--title \"<title>\"` for a new title, an HTML on the standard input for a new HTML, or both. When, while working, you produce something worth keeping as a Sheet, or see one to change, propose it in one line, such as « Enregistrer une Fiche : … ? », and act only once the User says yes.",
+  "- A Sheet has no versions: `sheet edit` replaces its HTML without a question, and the old one is lost. So before each replacement, even one the User asked for, ask for their agreement in the conversation, recalling that the HTML the Sheet has will be lost. One agreement covers one replacement: ask again for the next. A title changed alone loses nothing, so it takes no such question.",
+  "- Read a Sheet's HTML, with `specster sheet load F-n`, when the User names that Sheet or your work depends on it, and only then; `specster sheet list` prints their titles and their links.",
+  "- When you create a Task or a User Story from a Sheet, link them on your own with `specster sheet link F-n T-n` or `specster sheet link F-n US-n`.",
+  "- Marking a Sheet as a Favorite, archiving it, unarchiving it and deleting it are the User's, on its page: when asked for one, say so.",
+].join("\n");
 
 // How a Sheet's HTML is sent, kept byte for byte.
 const HTML = "text/html; charset=utf-8";
@@ -143,13 +160,33 @@ try {
   process.exitCode = 1;
 }
 
-// Writes the folder's link to the Project whose address the User copied from their browser.
+// Writes the folder's link to the Project whose address the User copied from their browser, and the « Fiches » section of
+// its CLAUDE.md, unless it is already there.
 async function init([address]) {
   const match = /^(https?:\/\/[^/]+)\/projets\/([0-9a-f-]{36})(?:\/|$)/i.exec(address ?? "");
   if (!match) throw new UserError(`Donnez l'adresse du projet, copiée dans le navigateur.\n\n${USAGE}`);
   const [, url, project] = match;
   writeFileSync(CONFIG_FILE, `${JSON.stringify({ url, project }, null, 2)}\n`);
   console.log(`Ce dossier est relié au projet ${project} de ${url}.`);
+  if (writeSheetsSection()) console.log(`La section « Fiches » est ajoutée à ${INSTRUCTIONS_FILE}.`);
+}
+
+// Adds the « Fiches » section to the folder's CLAUDE.md, created if missing: right after its « Meta-specs » section, that
+// is before the next heading of that level or above, or at its end without one. The rest of the file stays byte for byte,
+// and so does all of it when it already has a « Fiches » section: says whether it wrote.
+function writeSheetsSection() {
+  const instructions = existsSync(INSTRUCTIONS_FILE) ? readFileSync(INSTRUCTIONS_FILE, "utf8") : "";
+  if (SHEETS_HEADING.test(instructions)) return false;
+  const metaSpecs = /^### Meta-specs[ \t]*$/m.exec(instructions);
+  const afterHeading = metaSpecs ? metaSpecs.index + metaSpecs[0].length : instructions.length;
+  const nextHeading = instructions.slice(afterHeading).search(/^#{1,3} /m);
+  const at = nextHeading === -1 ? instructions.length : afterHeading + nextHeading;
+  const before = instructions.slice(0, at);
+  // A blank line parts the section from what comes before it, and from what follows.
+  const gap = before === "" || before.endsWith("\n\n") ? "" : before.endsWith("\n") ? "\n" : "\n\n";
+  const after = instructions.slice(at);
+  writeFileSync(INSTRUCTIONS_FILE, `${before}${gap}${SHEETS_SECTION}\n${after === "" ? "" : `\n${after}`}`);
+  return true;
 }
 
 // Creates a User Story in the linked Project, in no Release, with what comes on the standard input as its sentence, and
