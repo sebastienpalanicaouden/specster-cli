@@ -2,8 +2,9 @@
 // Specster from the command line, for a terminal or an agent: links a folder to a Project, then creates its User Stories
 // and changes their sentences, lists and creates its Releases, changes their groups and Tags, adds to their Interviews and
 // Spec Versions, writes their Notes, archives them and reads them, whole or as a Brief, writes a User Story's Notes, gives
-// it its Labels and archives it, and lists and writes the Project's Tasks, marks them done or back to do and links them
-// to its User Stories, through Specster's API, with the User's Personal Token.
+// it its Labels and archives it, lists and writes the Project's Tasks, marks them done or back to do and links them
+// to its User Stories, and lists, reads, creates and changes the Project's Sheets, through Specster's API, with the
+// User's Personal Token.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -44,6 +45,12 @@ const USAGE = `Usage :
   specster task undone <T-n>          remet la tâche à faire
   specster task link <T-n> <US-n>…    relie la tâche aux User Stories
   specster task unlink <T-n> <US-n>…  délie la tâche des User Stories
+  specster sheet list                 affiche les fiches du projet, celles en cours puis les archivées
+  specster sheet load <F-n>           affiche le HTML de la fiche, sans rien autour
+  specster sheet create --title "<titre>"
+                                      crée une fiche dans le projet, avec l'entrée standard, du HTML, pour contenu
+  specster sheet edit <F-n> [--title "<titre>"]
+                                      change le titre de la fiche, remplace son HTML par l'entrée standard, ou les deux
   specster load <R-n> [vN]            affiche la Release, ses User Stories avec leurs notes et leurs tâches,
                                       son interview et une version de spec, la version courante si vN n'est pas donnée
   specster load <US-n> [vN]           affiche la Release de la User Story, ou, sans Release, sa phrase, ses notes
@@ -54,6 +61,7 @@ const USAGE = `Usage :
 Une User Story se désigne par US-n dans un dossier relié, ou par son adresse.
 Une Release se désigne par R-n dans un dossier relié, ou par son adresse.
 Une tâche se désigne par T-n, dans un dossier relié seulement.
+Une fiche se désigne par F-n, dans un dossier relié seulement.
 Le jeton personnel, créé dans « Mon compte », se donne dans la variable SPECSTER_TOKEN.`;
 
 // As Specster's pages show them, such as « 29 octobre 2026 à 15:51 », in Paris time.
@@ -61,6 +69,9 @@ const DATE_FORMAT = new Intl.DateTimeFormat("fr-FR", { dateStyle: "long", timeSt
 
 // As the « Tâches » page shows a Task's dates, without the time, such as « 9 novembre 2026 », in Paris time.
 const DAY_FORMAT = new Intl.DateTimeFormat("fr-FR", { dateStyle: "long", timeZone: "Europe/Paris" });
+
+// How a Sheet's HTML is sent, kept byte for byte.
+const HTML = "text/html; charset=utf-8";
 
 // The colors of Labels, in French. A key missing here, from a Specster newer than the CLI, is shown as it is.
 const COLOR_NAMES = new Map([
@@ -106,6 +117,10 @@ const COMMANDS = {
   "task undone": markTaskToDo,
   "task link": linkTask,
   "task unlink": unlinkTask,
+  "sheet list": listSheets,
+  "sheet load": loadSheet,
+  "sheet create": createSheet,
+  "sheet edit": editSheet,
   load,
   brief,
 };
@@ -499,6 +514,100 @@ function taskAt(reference) {
   return { name: `T-${number}`, url, path: `/api/projets/${project}/taches/${number}` };
 }
 
+// The linked Project's Sheets, those in progress in the order of its « Fiches » page, then the Archived Sheets: two lines
+// each, its number and its title, then its dates, as its page writes them, and, only when they apply, « Favorite », when
+// it was archived, its Tasks and its User Stories. Without any, the page's message.
+async function listSheets(args) {
+  if (args.length > 0) throw new UserError(USAGE);
+  const { url, project } = linkedProject();
+  const { sheets } = await api(url, `/api/projets/${project}/fiches`);
+  if (sheets.length === 0) {
+    console.log("Ce projet n'a pas encore de fiche.");
+    return;
+  }
+  console.log(sheets.map(sheetBlock).join("\n\n"));
+}
+
+function sheetBlock({ number, title, favorite, createdAt, editedAt, archivedAt, tasks, userStories }) {
+  const line = [
+    `Créée le ${DATE_FORMAT.format(new Date(createdAt))}`,
+    ...(editedAt === null ? [] : [`modifiée le ${DATE_FORMAT.format(new Date(editedAt))}`]),
+    ...(favorite ? ["Favorite"] : []),
+    ...(archivedAt === null ? [] : [`Archivée le ${DATE_FORMAT.format(new Date(archivedAt))}`]),
+    ...(tasks.length === 0 ? [] : [`Tâches : ${tasks.map((task) => `T-${task.number}`).join(", ")}`]),
+    ...(userStories.length === 0
+      ? []
+      : [`User Stories : ${userStories.map((userStory) => `US-${userStory.number}`).join(", ")}`]),
+  ].join(" · ");
+  return `F-${number} · ${title}\n${line}`;
+}
+
+// Prints the Sheet's HTML alone, byte for byte as Specster keeps it, so that it can be redirected to a file.
+async function loadSheet([reference, ...others]) {
+  // Anything after the Sheet gets the same refusal, so that no argument is ignored in silence.
+  const sheet = sheetAt(others.length === 0 ? reference : null);
+  process.stdout.write(await api(sheet.url, sheet.path, { as: "bytes" }));
+}
+
+// Creates a Sheet in the linked Project, under the title given with --title, with what comes on the standard input, HTML
+// kept byte for byte, as its content.
+async function createSheet(args) {
+  const { title, others } = titleOption(args);
+  if (title === undefined || others.length > 0) {
+    throw new UserError(
+      `Donnez le titre de la fiche avec --title "<titre>", et son HTML sur l'entrée standard.\n\n${USAGE}`,
+    );
+  }
+  const { url, project } = linkedProject();
+  const created = await api(url, `/api/projets/${project}/fiches?${titleQuery(title)}`, {
+    method: "POST",
+    body: await standardInput(),
+    contentType: HTML,
+  });
+  console.log(`F-${created.number} créée.`);
+}
+
+// Changes the Sheet's title, given with --title, replaces its HTML with what comes on the standard input, or both in one
+// request, both or neither. A terminal, or an empty standard input, gives no HTML, and the Sheet keeps its own: the HTML
+// it had is lost once replaced, and the CLI asks nothing before.
+async function editSheet(args) {
+  const { title, others } = titleOption(args);
+  const sheet = sheetAt(others.length === 1 ? others[0] : null);
+  const html = process.stdin.isTTY ? Buffer.alloc(0) : await standardInput();
+  if (title === undefined && html.length === 0) {
+    throw new UserError(
+      `Donnez un nouveau titre avec --title "<titre>", un nouveau HTML sur l'entrée standard, ou les deux.\n\n${USAGE}`,
+    );
+  }
+  await api(sheet.url, title === undefined ? sheet.path : `${sheet.path}?${titleQuery(title)}`, {
+    method: "PATCH",
+    ...(html.length > 0 && { body: html, contentType: HTML }),
+  });
+  console.log(`${sheet.name} modifiée.`);
+}
+
+// The title --title gives, even empty, which Specster then refuses, and the other arguments. Without the option, or
+// with it twice or with nothing after it, no title.
+function titleOption(args) {
+  const at = args.indexOf("--title");
+  if (at === -1 || at === args.length - 1) return { title: undefined, others: args };
+  const others = args.toSpliced(at, 2);
+  return others.includes("--title") ? { title: undefined, others: args } : { title: args[at + 1], others };
+}
+
+// How the API takes a Sheet's title: in the address, as the request's body holds its HTML.
+function titleQuery(title) {
+  return new URLSearchParams({ titre: title }).toString();
+}
+
+// Where the API keeps the Sheet the User names, as F-n in a linked folder: the CLI takes no address for one.
+function sheetAt(reference) {
+  const number = /^F-([1-9][0-9]*)$/i.exec(reference ?? "")?.[1];
+  if (!number) throw new UserError(`Désignez la fiche par F-n.\n\n${USAGE}`);
+  const { url, project } = linkedProject();
+  return { name: `F-${number}`, url, path: `/api/projets/${project}/fiches/${number}` };
+}
+
 // What an agent reads before working on the Release or the User Story. A User Story in a Release leads to it, as it holds
 // its Interview and its Spec Versions. Nothing is printed unless all of it can be.
 async function load([reference, version]) {
@@ -710,7 +819,7 @@ function linkedProject() {
   }
 }
 
-// The API's answer, read as JSON unless asked for as text. Its errors come with a message for the User, in French.
+// The API's answer, read as JSON unless asked for as text or as bytes. Its errors come with a message for the User, in French.
 async function api(url, apiPath, { method = "GET", body, contentType, as = "json" } = {}) {
   const token = process.env.SPECSTER_TOKEN;
   if (!token) {
@@ -734,5 +843,6 @@ async function api(url, apiPath, { method = "GET", body, contentType, as = "json
     }
     throw new UserError(`Specster a répondu ${response.status}.`);
   }
+  if (as === "bytes") return Buffer.from(await response.arrayBuffer());
   return as === "text" ? response.text() : response.json();
 }
