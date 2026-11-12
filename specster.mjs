@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // Specster from the command line, for a terminal or an agent: links a folder to a Project, and writes the agent's rules
-// on its meta-specs and on its Sheets in the folder's CLAUDE.md, then creates its User Stories and changes their sentences, lists and creates its
-// Releases, changes their groups and Tags, adds to their Interviews and Spec Versions, writes their Notes, archives them
-// and reads them, whole or as a Brief, writes a User Story's Notes, gives it its Labels and archives it, lists and writes
-// the Project's Tasks, marks them done or back to do and links them to its User Stories, and lists, reads, creates and
-// changes the Project's Sheets and links them to its Tasks and to its User Stories, through Specster's API, with the
-// User's Personal Token.
+// on its meta-specs and on its Sheets in the folder's CLAUDE.md, then lists its User Stories, creates them and changes
+// their sentences, lists and creates its Releases, changes their groups and Tags, adds to their Interviews and Spec
+// Versions, writes their Notes, archives them and reads them, whole or as a Brief, writes a User Story's Notes, gives it
+// its Labels and archives it, lists and writes the Project's Tasks, marks them done or back to do and links them to its
+// User Stories, and lists, reads, creates and changes the Project's Sheets and links them to its Tasks and to its User
+// Stories, through Specster's API, with the User's Personal Token.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -16,6 +16,7 @@ const CONFIG_FILE = ".specster.json";
 const USAGE = `Usage :
   specster init <adresse du projet>   relie ce dossier au projet, et écrit les sections « Meta-specs » et « Fiches »
                                       de son CLAUDE.md
+  specster us list                    affiche les User Stories du projet, archivées comprises, avec leur phrase
   specster us create                  crée une User Story dans le projet, avec l'entrée standard pour phrase
   specster us edit <US-n>             remplace la phrase de la User Story par l'entrée standard
   specster release list               affiche les Releases du projet, la plus récente d'abord
@@ -81,8 +82,9 @@ const DAY_FORMAT = new Intl.DateTimeFormat("fr-FR", { dateStyle: "long", timeZon
 // has a section under one of these headings keeps it, whatever it says.
 const INSTRUCTIONS_FILE = "CLAUDE.md";
 
-// How specs and tickets cite a meta-spec, how an agent loads it, creates User Stories, notes Tasks, archives a Release
-// once delivered and gives it its Tag: word for word what the README gave to paste by hand.
+// How specs and tickets cite a meta-spec, how an agent loads it, creates User Stories in the words of those already
+// there, notes Tasks, archives a Release once delivered and gives it its Tag: word for word what the README gave to
+// paste by hand.
 const META_SPECS_HEADING = /^### Meta-specs[ \t]*$/m;
 const META_SPECS_SECTION = [
   "### Meta-specs",
@@ -91,7 +93,7 @@ const META_SPECS_SECTION = [
   "",
   "- A spec or ticket written from a meta-spec opens with « Meta-spec : R-n vN. Elle fait foi pour l'apparence et le comportement de ce qu'elle change, l'app réelle pour le reste de chaque écran, sauf les exceptions écrites ici ; ses commandes de démonstration ne font pas partie de la feature. », naming the exact version, and lists those exceptions. Each ticket repeats the line, for `/implement` reads the ticket alone.",
   "- Before implementing a ticket that cites a meta-spec, load that version: `specster load R-n vN`, or `npx --yes github:sebastienpalanicaouden/specster-cli load R-n vN` where `specster` isn't installed. It needs the User's Personal Token in `SPECSTER_TOKEN`; without it, ask the User to set it rather than working from the ticket alone. Older specs and tickets name a User Story instead, which `specster load US-n vN` still reads, through its Release.",
-  "- To create a User Story in the linked Project, or change its sentence, run `specster us create`, or `specster us edit US-n`, with the sentence on its standard input, through `npx` and with `SPECSTER_TOKEN` as above. Write the sentence as « En tant que …, je veux …, afin de … », when creating as when editing. When the role, the need or the benefit is missing, ask the User for it rather than inventing it; when all three are there, create or edit without asking for confirmation.",
+  "- To create a User Story in the linked Project, or change its sentence, run `specster us create`, or `specster us edit US-n`, with the sentence on its standard input, through `npx` and with `SPECSTER_TOKEN` as above. Write the sentence as « En tant que …, je veux …, afin de … », when creating as when editing. When the role, the need or the benefit is missing, ask the User for it rather than inventing it; when all three are there, create or edit without asking for confirmation. Before creating one, run `specster us list` and write the sentence in the words the existing ones use, for the role as for the domain's terms; when one already seems to say the same, name it in one line, such as « US-12 dit déjà : « … ». La créer quand même ? », and create it only once the User says yes.",
   "- To read the Tasks of the linked Project, run `specster task list`, or `specster task list --done` for those done, through `npx` and with `SPECSTER_TOKEN` as above. When the User asks you to note a Task, add it at once with `specster task add`, its text on its standard input. When, while working, you notice something to do outside your current work, propose it in one line, such as « Ajouter la tâche : … ? », and add it only once the User says yes: unlike a User Story, a Task is never added unasked. When you create a User Story from a Task, link them on your own with `specster task link T-n US-n`. Change a Task's text, delete it, mark it done or back to do (`specster task edit T-n`, `task delete T-n`, `task done T-n`, `task undone T-n`) only when the User asks, never on your own.",
   "- After merging a PR, archive each Release it delivers, without waiting for the deploy tag. The tickets the PR closed name their Releases (« Meta-spec : R-n vN »). A Release is delivered once its spec and every ticket citing « Meta-spec : R-n » are closed (check each citation is R-n itself, not R-n0); while one of them is open, it stays in progress. For each one delivered, add its delivery Note, give « merged » to it and to each of its User Stories, archive it, and tell the User in one line: `specster note add R-n` with the Note on its standard input, then `specster label add R-n merged`, then `specster label add US-n merged` for each of its User Stories, then `specster release archive R-n`, through `npx` and with `SPECSTER_TOKEN` as above. If a Label can't be given, for instance because its list has no « merged » Label, archive it all the same and say so in that line. Give no other Label unless the User asks. The Note, in French, on this model:",
   "",
@@ -141,6 +143,7 @@ class UserError extends Error {}
 
 const COMMANDS = {
   init,
+  "us list": listUserStories,
   "us create": createUserStory,
   "us edit": editUserStory,
   "release list": listReleases,
@@ -234,6 +237,24 @@ function withSection(instructions, at, section) {
   const gap = before === "" || before.endsWith("\n\n") ? "" : before.endsWith("\n") ? "\n" : "\n\n";
   const after = instructions.slice(at);
   return `${before}${gap}${section}\n${after === "" ? "" : `\n${after}`}`;
+}
+
+// All the linked Project's User Stories, archived ones included, in the order of their numbers, for an agent to read
+// before writing a new one: « US-3 · archivée · » or « US-3 · », then its sentence as written, line breaks included, and
+// a blank line between two, so that each one's end shows. Without any, the page's message.
+async function listUserStories(args) {
+  if (args.length > 0) throw new UserError(USAGE);
+  const { url, project } = linkedProject();
+  const { userStories } = await api(url, `/api/projets/${project}/us`);
+  if (userStories.length === 0) {
+    console.log("Ce projet n'a pas encore de User Story.");
+    return;
+  }
+  console.log(
+    userStories
+      .map(({ number, sentence, archivedAt }) => [`US-${number}`, ...(archivedAt ? ["archivée"] : []), sentence].join(" · "))
+      .join("\n\n"),
+  );
 }
 
 // Creates a User Story in the linked Project, in no Release, with what comes on the standard input as its sentence, and
@@ -1046,8 +1067,9 @@ async function api(url, apiPath, { method = "GET", body, contentType, as = "json
   if (!response.ok) {
     const error = await response.json().catch(() => null);
     if (error?.error) throw new UserError(error.error);
-    // A path Specster doesn't serve answers with a page, not with a message: a command newer than Specster itself.
-    if (response.status === 404) {
+    // A path Specster doesn't serve answers with a page, not with a message, and a method it doesn't serve on a path with
+    // nothing: a command newer than Specster itself, such as `us list` where it served only the POST of …/us.
+    if (response.status === 404 || response.status === 405) {
       throw new UserError(`Specster, à ${url}, ne connaît pas encore cette commande : il est plus ancien que la CLI.`);
     }
     throw new UserError(`Specster a répondu ${response.status}.`);
