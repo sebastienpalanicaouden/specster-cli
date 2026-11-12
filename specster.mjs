@@ -768,7 +768,7 @@ async function load([reference, version]) {
 // group differs from what the Current Spec Version covers. The Notes it shows are those of its User Stories: its own are
 // for note list.
 async function loadedRelease(release, asked) {
-  const { number, title, tag, archivedAt, labels, userStories, tasks, currentSpecVersion, specVersions, groupChange } =
+  const { number, title, tag, archivedAt, labels, userStories, tasks, sheets, currentSpecVersion, specVersions, groupChange } =
     await api(release.url, release.path);
   const shown = asked ?? currentSpecVersion;
   const covered = specVersions.find((specVersion) => specVersion.number === shown)?.covers;
@@ -793,6 +793,7 @@ async function loadedRelease(release, asked) {
     ...labelsLine(labels),
     ...userStoriesSection(userStories),
     ...linkedTasksSection(tasks, { ofRelease: true }),
+    ...linkedSheetsSection(sheets, { html: false }),
     "## Interview",
     ...interview,
     ...specVersion,
@@ -881,6 +882,24 @@ function linkedTasksSection(tasks, { ofRelease }) {
     return taskBlock(task, { level: 3, userStories });
   });
   return ["## Tâches reliées", ...(blocks.length > 0 ? blocks : ["Aucune tâche reliée."])];
+}
+
+// The Sheets linked to a Release's User Stories, as `load` prints them after its Tasks: each once, by number, under its
+// number and its title, then a line with its dates, without the time, as a Task's, and those of the Release's User
+// Stories that link it, and nothing of whether it is a Favorite. `html` is for the HTML of each, which `load` leaves
+// out: false is its only value so far. Left out for a Specster older than the Sheets, whose answer has none.
+function linkedSheetsSection(sheets, { html }) {
+  if (sheets === undefined) return [];
+  const blocks = sheets.map(({ number, title, createdAt, editedAt, archivedAt, userStories }) => {
+    const line = [
+      `Ajoutée le ${DAY_FORMAT.format(new Date(createdAt))}`,
+      ...(editedAt === null ? [] : [`modifiée le ${DAY_FORMAT.format(new Date(editedAt))}`]),
+      ...(archivedAt === null ? [] : [`archivée le ${DAY_FORMAT.format(new Date(archivedAt))}`]),
+      `User Stories : ${userStories.map((userStory) => `US-${userStory}`).join(", ")}`,
+    ].join(" · ");
+    return `### F-${number} · ${title}\n${line}`;
+  });
+  return ["## Fiches reliées", ...(blocks.length > 0 ? blocks : ["Aucune fiche reliée."])];
 }
 
 // Null while in progress.
