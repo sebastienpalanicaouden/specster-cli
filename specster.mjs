@@ -33,7 +33,7 @@ const USAGE = `Usage :
   specster note add <US-n|R-n>        ajoute l'entrée standard comme note de la User Story ou de la Release
   specster note edit <US-n|R-n> <N>   remplace le texte de la note N par l'entrée standard
   specster note list <US-n|R-n>       affiche les notes de la User Story ou de la Release
-  specster label list                 affiche les Labels des User Stories et ceux des Releases, avec leur couleur
+  specster label list                 affiche les Labels des User Stories, ceux des Releases et ceux des fiches
   specster label add <US-n|R-n> <nom>…
                                       pose des Labels de sa liste sur la User Story ou la Release
   specster label remove <US-n|R-n> <nom>…
@@ -445,12 +445,14 @@ async function listNotes([reference]) {
   console.log(listed.join("\n\n"));
 }
 
-// The linked Project's two lists of Labels, apart, each in alphabetical order, with their colors.
+// The linked Project's three lists of Labels, apart, each in alphabetical order, with their colors. A Specster older than
+// the Sheets' Labels serves their path as a Sheet's, which it doesn't find: the two others are then printed alone.
 async function listLabels() {
   const { url, project } = linkedProject();
-  const [ofUserStories, ofReleases] = await Promise.all([
+  const [ofUserStories, ofReleases, ofSheets] = await Promise.all([
     api(url, `/api/projets/${project}/labels`),
     api(url, `/api/projets/${project}/releases/labels`),
+    api(url, `/api/projets/${project}/fiches/labels`, { ifNotFound: null }),
   ]);
   const lines = (labels) =>
     labels.length > 0 ? labels.map(({ name, color }) => `${name} · ${COLOR_NAMES.get(color) ?? color}`) : ["Aucun Label."];
@@ -460,6 +462,7 @@ async function listLabels() {
       ...lines(ofUserStories.labels),
       "Labels des Releases :",
       ...lines(ofReleases.labels),
+      ...(ofSheets ? ["Labels des fiches :", ...lines(ofSheets.labels)] : []),
     ].join("\n"),
   );
 }
@@ -1049,8 +1052,9 @@ function linkedProject() {
   }
 }
 
-// The API's answer, read as JSON unless asked for as text or as bytes. Its errors come with a message for the User, in French.
-async function api(url, apiPath, { method = "GET", body, contentType, as = "json" } = {}) {
+// The API's answer, read as JSON unless asked for as text or as bytes. Its errors come with a message for the User, in French,
+// but for a 404 when `ifNotFound` is given, which it answers instead: a path a Specster older than the CLI doesn't serve.
+async function api(url, apiPath, { method = "GET", body, contentType, as = "json", ifNotFound } = {}) {
   const token = process.env.SPECSTER_TOKEN;
   if (!token) {
     throw new UserError(
@@ -1065,6 +1069,7 @@ async function api(url, apiPath, { method = "GET", body, contentType, as = "json
     throw new UserError(`Specster ne répond pas à ${url} : ${error.cause?.message ?? error.message}`);
   }
   if (!response.ok) {
+    if (response.status === 404 && ifNotFound !== undefined) return ifNotFound;
     const error = await response.json().catch(() => null);
     if (error?.error) throw new UserError(error.error);
     // A path Specster doesn't serve answers with a page, not with a message, and a method it doesn't serve on a path with
