@@ -786,10 +786,13 @@ function titleQuery(title) {
 // Where the API keeps the Sheet the User names, as F-n in a linked folder: the sheet commands take no address for one,
 // unlike label add and label remove.
 function sheetAt(reference) {
-  const number = /^F-([1-9][0-9]*)$/i.exec(reference ?? "")?.[1];
-  if (!number) throw new UserError(`Désignez la fiche par F-n.\n\n${USAGE}`);
-  const { url, project } = linkedProject();
-  return { name: `F-${number}`, url, path: sheetPath(project, number) };
+  const sheet = /^F-/i.test(reference ?? "") ? namedSheet(reference) : null;
+  if (!sheet) throw new UserError(`Désignez la fiche par F-n.\n\n${USAGE}`);
+  return sheet;
+}
+
+function namedSheet(reference) {
+  return named(reference, "F", "fiches");
 }
 
 // Where the API keeps the Sheet of this number in the Project.
@@ -1037,7 +1040,7 @@ function userStoryOrReleaseAt(reference) {
 // Where the API keeps what a Label goes on, the User Story, the Release or the Sheet the User names: a Sheet by F-n in a
 // linked folder or by its address, which only the commands of Labels take.
 function labelTargetAt(reference) {
-  const target = namedUserStory(reference) ?? namedRelease(reference) ?? named(reference, "F", "fiches");
+  const target = namedUserStory(reference) ?? namedRelease(reference) ?? namedSheet(reference);
   if (!target) {
     throw new UserError(`Désignez la User Story, la Release ou la fiche par US-n, R-n, F-n ou son adresse.\n\n${USAGE}`);
   }
