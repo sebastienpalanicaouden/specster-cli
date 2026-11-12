@@ -62,7 +62,7 @@ const USAGE = `Usage :
   specster load <US-n> [vN]           affiche la Release de la User Story, ou, sans Release, sa phrase, ses notes
                                       et ses tâches
   specster brief <R-n>                affiche la Release, ses User Stories avec leurs notes et leurs tâches,
-                                      et ses notes
+                                      les fiches reliées avec leur HTML, et ses notes
 
 Une User Story se désigne par US-n dans un dossier relié, ou par son adresse.
 Une Release se désigne par R-n dans un dossier relié, ou par son adresse.
@@ -821,26 +821,43 @@ async function loadedUserStory(userStory, asked) {
   ].join("\n\n");
 }
 
-// The Brief: what the Release says of its need, for an agent to read alone before a grilling. Its Interview is read only to
-// count its Entries. Nothing is printed unless all of it can be.
+// The Brief: what the Release says of its need, for an agent to read alone before a grilling, with the whole HTML of the
+// Sheets linked to its User Stories. Its Interview is read only to count its Entries. Nothing is printed unless all of it
+// can be.
 async function brief([reference, ...others]) {
   // Anything after the Release gets the same refusal, so that no argument is ignored in silence.
   const release = releaseAt(others.length === 0 ? reference : null);
-  const [{ number, title, archivedAt, userStories, tasks, currentSpecVersion }, { notes }, { entries }] = await Promise.all([
-    api(release.url, release.path),
-    api(release.url, `${release.path}/notes`),
-    api(release.url, `${release.path}/interview`),
-  ]);
+  const [{ number, title, archivedAt, userStories, tasks, sheets, currentSpecVersion }, { notes }, { entries }] =
+    await Promise.all([
+      releaseWithSheetsHtml(release),
+      api(release.url, `${release.path}/notes`),
+      api(release.url, `${release.path}/interview`),
+    ]);
   console.log(
     [
       ...releaseHeading({ number, title, archivedAt }),
       ...userStoriesSection(userStories),
       ...linkedTasksSection(tasks, { ofRelease: true }),
+      ...linkedSheetsSection(sheets, { html: true }),
       "## Notes de la Release",
       ...(notes.length > 0 ? notes.map(noteLine) : ["Cette Release n'a pas encore de note."]),
       ...notLoadedLine(entries.length, currentSpecVersion),
     ].join("\n\n"),
   );
+}
+
+// The Release's answer, each of its Sheets with its HTML, read by the Sheet's own route once the answer names them, all
+// at once, and as bytes, so that a byte order mark at its start stays, as `sheet load` prints it.
+async function releaseWithSheetsHtml(release) {
+  const answered = await api(release.url, release.path);
+  if (answered.sheets === undefined) return answered;
+  const sheets = await Promise.all(
+    answered.sheets.map(async (sheet) => {
+      const sheetPath = release.path.replace(/\/releases\/[0-9]+$/, `/fiches/${sheet.number}`);
+      return { ...sheet, html: (await api(release.url, sheetPath, { as: "bytes" })).toString() };
+    }),
+  );
+  return { ...answered, sheets };
 }
 
 // What the Brief leaves out, by a count and a number, nothing of their content, and no line when there is none of it.
@@ -884,22 +901,36 @@ function linkedTasksSection(tasks, { ofRelease }) {
   return ["## Tâches reliées", ...(blocks.length > 0 ? blocks : ["Aucune tâche reliée."])];
 }
 
-// The Sheets linked to a Release's User Stories, as `load` prints them after its Tasks: each once, by number, under its
-// number and its title, then a line with its dates, without the time, as a Task's, and those of the Release's User
-// Stories that link it, and nothing of whether it is a Favorite. `html` is for the HTML of each, which `load` leaves
-// out: false is its only value so far. Left out for a Specster older than the Sheets, whose answer has none.
+// The Sheets linked to a Release's User Stories, as `load` and `brief` print them after its Tasks: each once, by number,
+// under its number and its title, then a line with its dates, without the time, as a Task's, and those of the Release's
+// User Stories that link it, and nothing of whether it is a Favorite. With `html`, as `brief` gives them, each is then
+// followed by its whole HTML, which `load` leaves out. Left out for a Specster older than the Sheets, whose answer has
+// none.
 function linkedSheetsSection(sheets, { html }) {
   if (sheets === undefined) return [];
-  const blocks = sheets.map(({ number, title, createdAt, editedAt, archivedAt, userStories }) => {
+  const blocks = sheets.map((sheet) => {
+    const { number, title, createdAt, editedAt, archivedAt, userStories } = sheet;
     const line = [
       `Ajoutée le ${DAY_FORMAT.format(new Date(createdAt))}`,
       ...(editedAt === null ? [] : [`modifiée le ${DAY_FORMAT.format(new Date(editedAt))}`]),
       ...(archivedAt === null ? [] : [`archivée le ${DAY_FORMAT.format(new Date(archivedAt))}`]),
       `User Stories : ${userStories.map((userStory) => `US-${userStory}`).join(", ")}`,
     ].join(" · ");
-    return `### F-${number} · ${title}\n${line}`;
+    const named = `### F-${number} · ${title}\n${line}`;
+    return html ? `${named}\n\n${htmlBlock(sheet.html)}` : named;
   });
   return ["## Fiches reliées", ...(blocks.length > 0 ? blocks : ["Aucune fiche reliée."])];
+}
+
+// A Sheet's HTML, whole and as Specster keeps it, in a code block that nothing in it can close: its fences are one
+// backtick longer than the longest run of them in the HTML, three at least, so that neither a heading nor a code block
+// written in it passes for a part of the Brief. A line break is added only when the HTML ends without one, so that the
+// closing fence has its own line.
+function htmlBlock(html) {
+  let longest = 0;
+  for (const [run] of html.matchAll(/`+/g)) longest = Math.max(longest, run.length);
+  const fence = "`".repeat(Math.max(3, longest + 1));
+  return `${fence}html\n${html.endsWith("\n") ? html : `${html}\n`}${fence}`;
 }
 
 // Null while in progress.
