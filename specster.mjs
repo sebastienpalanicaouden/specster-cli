@@ -58,11 +58,12 @@ const USAGE = `Usage :
   specster sheet unlink <F-n> <T-n|US-n>…
                                       délie la fiche des tâches et des User Stories
   specster load <R-n> [vN]            affiche la Release, ses User Stories avec leurs notes et leurs tâches,
-                                      son interview et une version de spec, la version courante si vN n'est pas donnée
+                                      les fiches reliées sans leur HTML, son interview et une version de spec,
+                                      la version courante si vN n'est pas donnée
   specster load <US-n> [vN]           affiche la Release de la User Story, ou, sans Release, sa phrase, ses notes
                                       et ses tâches
   specster brief <R-n>                affiche la Release, ses User Stories avec leurs notes et leurs tâches,
-                                      et ses notes
+                                      les fiches reliées avec leur HTML, et ses notes
 
 Une User Story se désigne par US-n dans un dossier relié, ou par son adresse.
 Une Release se désigne par R-n dans un dossier relié, ou par son adresse.
@@ -516,13 +517,21 @@ async function listTasks(args) {
 function taskBlock({ number, text, createdAt, editedAt, doneAt }, { level, userStories, sheets = [] }) {
   const state = doneAt === null ? "À faire" : `Faite le ${DAY_FORMAT.format(new Date(doneAt))}`;
   const line = [
-    `Ajoutée le ${DAY_FORMAT.format(new Date(createdAt))}`,
-    ...(editedAt === null ? [] : [`modifiée le ${DAY_FORMAT.format(new Date(editedAt))}`]),
+    ...addedAndEditedDays({ createdAt, editedAt }),
     ...(userStories === undefined ? [] : [`User Stories : ${userStories.join(", ") || "aucune"}`]),
     ...(sheets.length === 0 ? [] : [`Fiches : ${sheets.join(", ")}`]),
   ].join(" · ");
   // Without the line break a heredoc ends with, which would double the blank line before the next Task.
   return `${"#".repeat(level)} T-${number} · ${state}\n${line}\n\n${text.replace(/\n+$/, "")}`;
+}
+
+// How the line of a Task or of a linked Sheet starts: the day it was added, then, once it has been changed, the day it
+// last was, without the time.
+function addedAndEditedDays({ createdAt, editedAt }) {
+  return [
+    `Ajoutée le ${DAY_FORMAT.format(new Date(createdAt))}`,
+    ...(editedAt === null ? [] : [`modifiée le ${DAY_FORMAT.format(new Date(editedAt))}`]),
+  ];
 }
 
 // A User Story linked to a Task, as its pill on the « Tâches » page shows it: « US-26 · Archivée » once archived, « US-36 ·
@@ -751,7 +760,12 @@ function sheetAt(reference) {
   const number = /^F-([1-9][0-9]*)$/i.exec(reference ?? "")?.[1];
   if (!number) throw new UserError(`Désignez la fiche par F-n.\n\n${USAGE}`);
   const { url, project } = linkedProject();
-  return { name: `F-${number}`, url, path: `/api/projets/${project}/fiches/${number}` };
+  return { name: `F-${number}`, url, path: sheetPath(project, number) };
+}
+
+// Where the API keeps the Sheet of this number in the Project.
+function sheetPath(project, number) {
+  return `/api/projets/${project}/fiches/${number}`;
 }
 
 // What an agent reads before working on the Release or the User Story. A User Story in a Release leads to it, as it holds
@@ -768,7 +782,7 @@ async function load([reference, version]) {
 // group differs from what the Current Spec Version covers. The Notes it shows are those of its User Stories: its own are
 // for note list.
 async function loadedRelease(release, asked) {
-  const { number, title, tag, archivedAt, labels, userStories, tasks, currentSpecVersion, specVersions, groupChange } =
+  const { number, title, tag, archivedAt, labels, userStories, tasks, sheets, currentSpecVersion, specVersions, groupChange } =
     await api(release.url, release.path);
   const shown = asked ?? currentSpecVersion;
   const covered = specVersions.find((specVersion) => specVersion.number === shown)?.covers;
@@ -793,6 +807,7 @@ async function loadedRelease(release, asked) {
     ...labelsLine(labels),
     ...userStoriesSection(userStories),
     ...linkedTasksSection(tasks, { ofRelease: true }),
+    ...linkedSheetsSection(sheets, { html: false }),
     "## Interview",
     ...interview,
     ...specVersion,
@@ -820,26 +835,43 @@ async function loadedUserStory(userStory, asked) {
   ].join("\n\n");
 }
 
-// The Brief: what the Release says of its need, for an agent to read alone before a grilling. Its Interview is read only to
-// count its Entries. Nothing is printed unless all of it can be.
+// The Brief: what the Release says of its need, for an agent to read alone before a grilling, with the whole HTML of the
+// Sheets linked to its User Stories. Its Interview is read only to count its Entries. Nothing is printed unless all of it
+// can be.
 async function brief([reference, ...others]) {
   // Anything after the Release gets the same refusal, so that no argument is ignored in silence.
   const release = releaseAt(others.length === 0 ? reference : null);
-  const [{ number, title, archivedAt, userStories, tasks, currentSpecVersion }, { notes }, { entries }] = await Promise.all([
-    api(release.url, release.path),
-    api(release.url, `${release.path}/notes`),
-    api(release.url, `${release.path}/interview`),
-  ]);
+  const [{ number, title, archivedAt, userStories, tasks, sheets, currentSpecVersion }, { notes }, { entries }] =
+    await Promise.all([
+      releaseWithSheetsHtml(release),
+      api(release.url, `${release.path}/notes`),
+      api(release.url, `${release.path}/interview`),
+    ]);
   console.log(
     [
       ...releaseHeading({ number, title, archivedAt }),
       ...userStoriesSection(userStories),
       ...linkedTasksSection(tasks, { ofRelease: true }),
+      ...linkedSheetsSection(sheets, { html: true }),
       "## Notes de la Release",
       ...(notes.length > 0 ? notes.map(noteLine) : ["Cette Release n'a pas encore de note."]),
       ...notLoadedLine(entries.length, currentSpecVersion),
     ].join("\n\n"),
   );
+}
+
+// The Release's answer, each of its Sheets with its HTML, read by the Sheet's own route once the answer names them, all
+// at once, and as bytes, so that a byte order mark at its start stays, as `sheet load` prints it.
+async function releaseWithSheetsHtml(release) {
+  const answered = await api(release.url, release.path);
+  if (answered.sheets === undefined) return answered;
+  const sheets = await Promise.all(
+    answered.sheets.map(async (sheet) => {
+      const html = await api(release.url, sheetPath(release.project, sheet.number), { as: "bytes" });
+      return { ...sheet, html: html.toString() };
+    }),
+  );
+  return { ...answered, sheets };
 }
 
 // What the Brief leaves out, by a count and a number, nothing of their content, and no line when there is none of it.
@@ -881,6 +913,37 @@ function linkedTasksSection(tasks, { ofRelease }) {
     return taskBlock(task, { level: 3, userStories });
   });
   return ["## Tâches reliées", ...(blocks.length > 0 ? blocks : ["Aucune tâche reliée."])];
+}
+
+// The Sheets linked to a Release's User Stories, as `load` and `brief` print them after its Tasks: each once, by number,
+// under its number and its title, then a line with its dates, without the time, as a Task's, and those of the Release's
+// User Stories that link it, and nothing of whether it is a Favorite. With `html`, as `brief` gives them, each is then
+// followed by its whole HTML, which `load` leaves out. Left out for a Specster older than the Sheets, whose answer has
+// none.
+function linkedSheetsSection(sheets, { html }) {
+  if (sheets === undefined) return [];
+  const blocks = sheets.map((sheet) => {
+    const { number, title, archivedAt, userStories } = sheet;
+    const line = [
+      ...addedAndEditedDays(sheet),
+      ...(archivedAt === null ? [] : [`archivée le ${DAY_FORMAT.format(new Date(archivedAt))}`]),
+      `User Stories : ${userStories.map((userStory) => `US-${userStory}`).join(", ")}`,
+    ].join(" · ");
+    const named = `### F-${number} · ${title}\n${line}`;
+    return html ? `${named}\n\n${htmlBlock(sheet.html)}` : named;
+  });
+  return ["## Fiches reliées", ...(blocks.length > 0 ? blocks : ["Aucune fiche reliée."])];
+}
+
+// A Sheet's HTML, whole and as Specster keeps it, in a code block that nothing in it can close: its fences are one
+// backtick longer than the longest run of them in the HTML, three at least, so that neither a heading nor a code block
+// written in it passes for a part of the Brief. A line break is added only when the HTML ends without one, so that the
+// closing fence has its own line.
+function htmlBlock(html) {
+  let longest = 0;
+  for (const [run] of html.matchAll(/`+/g)) longest = Math.max(longest, run.length);
+  const fence = "`".repeat(Math.max(3, longest + 1));
+  return `${fence}html\n${html.endsWith("\n") ? html : `${html}\n`}${fence}`;
 }
 
 // Null while in progress.
@@ -925,14 +988,14 @@ function namedUserStory(reference) {
 }
 
 // Where the API keeps what the reference names, by its address, or by its number in a linked folder, such as R-3 with the
-// prefix R. Null when the reference is malformed.
+// prefix R, and in which Project. Null when the reference is malformed.
 function named(reference, prefix, collection) {
   const byAddress = new RegExp(`^(https?://[^/]+)/projets/([0-9a-f-]{36})/${collection}/([1-9][0-9]*)/?$`, "i").exec(reference ?? "");
   const byNumber = new RegExp(`^${prefix}-([1-9][0-9]*)$`, "i").exec(reference ?? "");
   if (!byAddress && !byNumber) return null;
   const { url, project } = byAddress ? { url: byAddress[1], project: byAddress[2] } : linkedProject();
   const number = byAddress ? byAddress[3] : byNumber[1];
-  return { name: `${prefix}-${number}`, url, path: `/api/projets/${project}/${collection}/${number}` };
+  return { name: `${prefix}-${number}`, url, project, path: `/api/projets/${project}/${collection}/${number}` };
 }
 
 // Where the API keeps the User Story or the Release the User names, for a command that takes either.
