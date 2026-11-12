@@ -58,7 +58,8 @@ const USAGE = `Usage :
   specster sheet unlink <F-n> <T-n|US-n>…
                                       délie la fiche des tâches et des User Stories
   specster load <R-n> [vN]            affiche la Release, ses User Stories avec leurs notes et leurs tâches,
-                                      son interview et une version de spec, la version courante si vN n'est pas donnée
+                                      les fiches reliées sans leur HTML, son interview et une version de spec,
+                                      la version courante si vN n'est pas donnée
   specster load <US-n> [vN]           affiche la Release de la User Story, ou, sans Release, sa phrase, ses notes
                                       et ses tâches
   specster brief <R-n>                affiche la Release, ses User Stories avec leurs notes et leurs tâches,
