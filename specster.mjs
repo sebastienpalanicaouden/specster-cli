@@ -517,13 +517,21 @@ async function listTasks(args) {
 function taskBlock({ number, text, createdAt, editedAt, doneAt }, { level, userStories, sheets = [] }) {
   const state = doneAt === null ? "À faire" : `Faite le ${DAY_FORMAT.format(new Date(doneAt))}`;
   const line = [
-    `Ajoutée le ${DAY_FORMAT.format(new Date(createdAt))}`,
-    ...(editedAt === null ? [] : [`modifiée le ${DAY_FORMAT.format(new Date(editedAt))}`]),
+    ...addedAndEditedDays({ createdAt, editedAt }),
     ...(userStories === undefined ? [] : [`User Stories : ${userStories.join(", ") || "aucune"}`]),
     ...(sheets.length === 0 ? [] : [`Fiches : ${sheets.join(", ")}`]),
   ].join(" · ");
   // Without the line break a heredoc ends with, which would double the blank line before the next Task.
   return `${"#".repeat(level)} T-${number} · ${state}\n${line}\n\n${text.replace(/\n+$/, "")}`;
+}
+
+// How the line of a Task or of a linked Sheet starts: the day it was added, then, once it has been changed, the day it
+// last was, without the time.
+function addedAndEditedDays({ createdAt, editedAt }) {
+  return [
+    `Ajoutée le ${DAY_FORMAT.format(new Date(createdAt))}`,
+    ...(editedAt === null ? [] : [`modifiée le ${DAY_FORMAT.format(new Date(editedAt))}`]),
+  ];
 }
 
 // A User Story linked to a Task, as its pill on the « Tâches » page shows it: « US-26 · Archivée » once archived, « US-36 ·
@@ -752,7 +760,12 @@ function sheetAt(reference) {
   const number = /^F-([1-9][0-9]*)$/i.exec(reference ?? "")?.[1];
   if (!number) throw new UserError(`Désignez la fiche par F-n.\n\n${USAGE}`);
   const { url, project } = linkedProject();
-  return { name: `F-${number}`, url, path: `/api/projets/${project}/fiches/${number}` };
+  return { name: `F-${number}`, url, path: sheetPath(project, number) };
+}
+
+// Where the API keeps the Sheet of this number in the Project.
+function sheetPath(project, number) {
+  return `/api/projets/${project}/fiches/${number}`;
 }
 
 // What an agent reads before working on the Release or the User Story. A User Story in a Release leads to it, as it holds
@@ -854,8 +867,8 @@ async function releaseWithSheetsHtml(release) {
   if (answered.sheets === undefined) return answered;
   const sheets = await Promise.all(
     answered.sheets.map(async (sheet) => {
-      const sheetPath = release.path.replace(/\/releases\/[0-9]+$/, `/fiches/${sheet.number}`);
-      return { ...sheet, html: (await api(release.url, sheetPath, { as: "bytes" })).toString() };
+      const html = await api(release.url, sheetPath(release.project, sheet.number), { as: "bytes" });
+      return { ...sheet, html: html.toString() };
     }),
   );
   return { ...answered, sheets };
@@ -910,10 +923,9 @@ function linkedTasksSection(tasks, { ofRelease }) {
 function linkedSheetsSection(sheets, { html }) {
   if (sheets === undefined) return [];
   const blocks = sheets.map((sheet) => {
-    const { number, title, createdAt, editedAt, archivedAt, userStories } = sheet;
+    const { number, title, archivedAt, userStories } = sheet;
     const line = [
-      `Ajoutée le ${DAY_FORMAT.format(new Date(createdAt))}`,
-      ...(editedAt === null ? [] : [`modifiée le ${DAY_FORMAT.format(new Date(editedAt))}`]),
+      ...addedAndEditedDays(sheet),
       ...(archivedAt === null ? [] : [`archivée le ${DAY_FORMAT.format(new Date(archivedAt))}`]),
       `User Stories : ${userStories.map((userStory) => `US-${userStory}`).join(", ")}`,
     ].join(" · ");
@@ -976,14 +988,14 @@ function namedUserStory(reference) {
 }
 
 // Where the API keeps what the reference names, by its address, or by its number in a linked folder, such as R-3 with the
-// prefix R. Null when the reference is malformed.
+// prefix R, and in which Project. Null when the reference is malformed.
 function named(reference, prefix, collection) {
   const byAddress = new RegExp(`^(https?://[^/]+)/projets/([0-9a-f-]{36})/${collection}/([1-9][0-9]*)/?$`, "i").exec(reference ?? "");
   const byNumber = new RegExp(`^${prefix}-([1-9][0-9]*)$`, "i").exec(reference ?? "");
   if (!byAddress && !byNumber) return null;
   const { url, project } = byAddress ? { url: byAddress[1], project: byAddress[2] } : linkedProject();
   const number = byAddress ? byAddress[3] : byNumber[1];
-  return { name: `${prefix}-${number}`, url, path: `/api/projets/${project}/${collection}/${number}` };
+  return { name: `${prefix}-${number}`, url, project, path: `/api/projets/${project}/${collection}/${number}` };
 }
 
 // Where the API keeps the User Story or the Release the User names, for a command that takes either.

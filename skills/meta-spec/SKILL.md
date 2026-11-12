@@ -37,7 +37,7 @@ Run the CLI as [`../cli.md`](../cli.md) says. What a meta-spec holds, and what S
 
    When the check leaves nothing to ask, say so, such as « Aucun ajout n'en contredit un autre. »
 
-   Then read each Sheet under « Fiches reliées » that a decision this content draws on names, such as « La page suit la maquette de F-3. », with `specster sheet load F-n`, its HTML whole: when the harness saves the output to a file and shows only its start, read that file, in chunks if need be. Keep of it only what the Interview decided of it, such as a mockup's layout when the decision takes its layout. A Sheet no such decision names brings nothing: leave it unread. When a Sheet is too large to read whole, tell the User, naming it, such as « Attention : F-3 fait 4,2 Mo, je n'ai pu en lire que le début. », and go on with what you read.
+   Then read each Sheet under « Fiches reliées » that a decision this content draws on names, such as « La page suit la maquette de F-3. », with `specster sheet load F-n`, its HTML whole, reading a long output as `cli.md` says. Keep of it only what the Interview decided of it, such as a mockup's layout when the decision takes its layout. A Sheet no such decision names brings nothing: leave it unread. When a Sheet is too large to read whole, give the User the warning `cli.md` gives at once, and go on with what you read.
 
    Then list the screens this content touches, as [`FORMAT.md`](FORMAT.md) defines them, on your own: the User checks the list on the draft, at step 5. Search the codebase for every place that uses what changes, such as a shared component, text or piece of data, and list each screen these places appear on: those a feature is used on, and those it changes as a side effect.
 
