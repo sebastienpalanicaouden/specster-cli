@@ -4,8 +4,8 @@
 // their sentences, lists and creates its Releases, changes their groups and Tags, adds to their Interviews and Spec
 // Versions, writes their Notes, archives them and reads them, whole or as a Brief, writes a User Story's Notes, gives it
 // its Labels and archives it, lists and writes the Project's Tasks, marks them done or back to do and links them to its
-// User Stories, and lists, reads, creates and changes the Project's Sheets and links them to its Tasks and to its User
-// Stories, through Specster's API, with the User's Personal Token.
+// User Stories, and lists, reads, creates and changes the Project's Sheets, gives them their Labels and links them to its
+// Tasks and to its User Stories, through Specster's API, with the User's Personal Token.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -34,10 +34,10 @@ const USAGE = `Usage :
   specster note edit <US-n|R-n> <N>   remplace le texte de la note N par l'entrée standard
   specster note list <US-n|R-n>       affiche les notes de la User Story ou de la Release
   specster label list                 affiche les Labels des User Stories, ceux des Releases et ceux des fiches
-  specster label add <US-n|R-n> <nom>…
-                                      pose des Labels de sa liste sur la User Story ou la Release
-  specster label remove <US-n|R-n> <nom>…
-                                      retire des Labels de la User Story ou de la Release
+  specster label add <US-n|R-n|F-n> <nom>…
+                                      pose des Labels de sa liste sur la User Story, la Release ou la fiche
+  specster label remove <US-n|R-n|F-n> <nom>…
+                                      retire des Labels de la User Story, de la Release ou de la fiche
   specster archive <US-n>             archive la User Story, si elle n'est dans aucune Release
   specster unarchive <US-n>           désarchive la User Story, si elle n'est dans aucune Release
   specster task list [--done]         affiche les tâches à faire du projet, ou ses tâches faites avec --done
@@ -69,7 +69,7 @@ const USAGE = `Usage :
 Une User Story se désigne par US-n dans un dossier relié, ou par son adresse.
 Une Release se désigne par R-n dans un dossier relié, ou par son adresse.
 Une tâche se désigne par T-n, dans un dossier relié seulement.
-Une fiche se désigne par F-n, dans un dossier relié seulement.
+Une fiche se désigne par F-n dans un dossier relié, ou, pour label add et label remove, par son adresse.
 Le jeton personnel, créé dans « Mon compte », se donne dans la variable SPECSTER_TOKEN.`;
 
 // As Specster's pages show them, such as « 29 octobre 2026 à 15:51 », in Paris time.
@@ -109,7 +109,7 @@ const META_SPECS_SECTION = [
   "- After a successful deployment, run `specster release tag R-n vX.Y.Z` for each Archived Release with no Tag that has « merged », whatever its case: `specster release list` shows them. A canceled Release has no « merged », so it stays without a Tag.",
 ].join("\n");
 
-// When an agent creates, changes, reads and links a Sheet.
+// When an agent creates, changes, reads and links a Sheet, and gives it its Labels.
 const SHEETS_HEADING = /^### Fiches[ \t]*$/m;
 const SHEETS_SECTION = [
   "### Fiches",
@@ -120,6 +120,7 @@ const SHEETS_SECTION = [
   "- A Sheet has no versions: `sheet edit` replaces its HTML without a question, and the old one is lost. So before each replacement, even one the User asked for, ask for their agreement in the conversation, recalling that the HTML the Sheet has will be lost. One agreement covers one replacement: ask again for the next. A title changed alone loses nothing, so it takes no such question.",
   "- Read a Sheet's HTML, with `specster sheet load F-n`, when the User names that Sheet or your work depends on it, and only then; `specster sheet list` prints their titles and their links.",
   "- When you create a Task or a User Story from a Sheet, link them on your own with `specster sheet link F-n T-n` or `specster sheet link F-n US-n`.",
+  "- Give a Sheet a Label, or take one from it, only when the User asks: `specster label add F-n <label>`, `specster label remove F-n <label>`.",
   "- Marking a Sheet as a Favorite, archiving it, unarchiving it and deleting it are the User's, on its page: when asked for one, say so.",
 ].join("\n");
 
@@ -467,14 +468,15 @@ async function listLabels() {
   );
 }
 
-// Gives the User Story or the Release the Labels of its list the User names. Asking again changes nothing.
+// Gives the User Story, the Release or the Sheet, archived or not, the Labels of its list the User names. Asking again
+// changes nothing.
 async function addLabels(args) {
   await changeLabels("add", args, (targetName, name, changed) =>
     changed ? `Label « ${name} » ajouté à ${targetName}.` : `${targetName} avait déjà le Label « ${name} ».`,
   );
 }
 
-// Takes the named Labels off the User Story or the Release. Asking again changes nothing.
+// Takes the named Labels off the User Story, the Release or the Sheet. Asking again changes nothing.
 async function removeLabels(args) {
   await changeLabels("remove", args, (targetName, name, changed) =>
     changed ? `Label « ${name} » retiré de ${targetName}.` : `${targetName} n'avait pas le Label « ${name} ».`,
@@ -483,7 +485,7 @@ async function removeLabels(args) {
 
 // One request for all the names, so that an unknown one changes nothing for the others. One line for each Label.
 async function changeLabels(change, [reference, ...names], lineFor) {
-  const target = userStoryOrReleaseAt(reference);
+  const target = labelTargetAt(reference);
   if (names.length === 0) throw new UserError(`Donnez au moins un nom de Label, comme merged.\n\n${USAGE}`);
   const { labels } = await api(target.url, `${target.path}/labels`, {
     method: "PATCH",
@@ -655,7 +657,7 @@ function taskAt(reference) {
 
 // The linked Project's Sheets, those in progress in the order of its « Fiches » page, then the Archived Sheets: two lines
 // each, its number and its title, then its dates, as its page writes them, and, only when they apply, « Favorite », when
-// it was archived, its Tasks and its User Stories. Without any, the page's message.
+// it was archived, its Tasks, its User Stories and its Labels. Without any, the page's message.
 async function listSheets(args) {
   if (args.length > 0) throw new UserError(USAGE);
   const { url, project } = linkedProject();
@@ -667,7 +669,8 @@ async function listSheets(args) {
   console.log(sheets.map(sheetBlock).join("\n\n"));
 }
 
-function sheetBlock({ number, title, favorite, createdAt, editedAt, archivedAt, tasks, userStories }) {
+// A Specster older than the Sheet Labels gives no `labels`: the line then names none.
+function sheetBlock({ number, title, favorite, createdAt, editedAt, archivedAt, tasks, userStories, labels = [] }) {
   const line = [
     `Créée le ${DATE_FORMAT.format(new Date(createdAt))}`,
     ...(editedAt === null ? [] : [`modifiée le ${DATE_FORMAT.format(new Date(editedAt))}`]),
@@ -677,6 +680,7 @@ function sheetBlock({ number, title, favorite, createdAt, editedAt, archivedAt, 
     ...(userStories.length === 0
       ? []
       : [`User Stories : ${userStories.map((userStory) => `US-${userStory.number}`).join(", ")}`]),
+    ...labelsLine(labels),
   ].join(" · ");
   return `F-${number} · ${title}\n${line}`;
 }
@@ -779,7 +783,8 @@ function titleQuery(title) {
   return new URLSearchParams({ titre: title }).toString();
 }
 
-// Where the API keeps the Sheet the User names, as F-n in a linked folder: the CLI takes no address for one.
+// Where the API keeps the Sheet the User names, as F-n in a linked folder: the sheet commands take no address for one,
+// unlike label add and label remove.
 function sheetAt(reference) {
   const number = /^F-([1-9][0-9]*)$/i.exec(reference ?? "")?.[1];
   if (!number) throw new UserError(`Désignez la fiche par F-n.\n\n${USAGE}`);
@@ -1026,6 +1031,16 @@ function named(reference, prefix, collection) {
 function userStoryOrReleaseAt(reference) {
   const target = namedUserStory(reference) ?? namedRelease(reference);
   if (!target) throw new UserError(`Désignez la User Story ou la Release par US-n, R-n ou son adresse.\n\n${USAGE}`);
+  return target;
+}
+
+// Where the API keeps what a Label goes on, the User Story, the Release or the Sheet the User names: a Sheet by F-n in a
+// linked folder or by its address, which only the commands of Labels take.
+function labelTargetAt(reference) {
+  const target = namedUserStory(reference) ?? namedRelease(reference) ?? named(reference, "F", "fiches");
+  if (!target) {
+    throw new UserError(`Désignez la User Story, la Release ou la fiche par US-n, R-n, F-n ou son adresse.\n\n${USAGE}`);
+  }
   return target;
 }
 
