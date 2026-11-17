@@ -23,4 +23,4 @@ A mockup reproduces its whole screen in the app's own look (its colours, fonts a
 
 The Release's page shows the meta-spec in an iframe sandboxed with scripts only: the preview has no cookies, no `localStorage` or `sessionStorage` (they throw), no clipboard, no pop-ups and no navigation of the page around it. A mockup that needs one of these simulates it, such as showing the success state on click instead of really copying. The draft opened from a file can do more than the preview: check it against these limits, not against what works locally.
 
-The PDF download prints the page as it loads, so the mockups follow one another down the page, all open, with no tabs or collapsed panels, and each one's first state reads well on paper.
+The preview is printed from the browser as it loads, and read in one scroll, so the mockups follow one another down the page, all open, with no tabs or collapsed panels, and each one's first state reads well on paper.

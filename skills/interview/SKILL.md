@@ -17,6 +17,8 @@ Run the CLI as [`../cli.md`](../cli.md) says.
    **Réponse :** <the User's answer, as typed: the option chosen and any note added>
    ```
 
-   The transcript is verbatim: questions as you asked them, answers in the User's own words, typos included. Done when every question of the grilling is there with its answer, none merged or summarised.
+   A **recap**, a message restating the grilling's decisions for the User to confirm, counts as a question even when not phrased as one: it takes its place in the order, as presented, followed by the User's answer as typed, such as « oui, sauf … ». Each recap presented has its own place, such as a new one after a correction. One the User hasn't answered yet, as when this command follows it at once, gets an empty `**Réponse :**`. A grilling that presented no recap ends its transcript on its last question.
+
+   The transcript is verbatim: questions as you asked them, answers in the User's own words, typos included. Done when every question of the grilling, each recap it presented included, is there with its answer, empty for a recap not yet answered, none merged or summarised.
 3. **Send it**: `specster interview add <R-n>`, the transcript on the standard input. Done when the CLI prints « Ajout enregistré dans l'interview de R-n. »
 4. **Report** to the User, in French: the Release and how many questions were saved. When the grilling changed the need a sentence states, say so: the User changes the sentence by hand, on the User Story's page in Specster. When the load ended with « Le groupe a changé depuis vN : … », add that `/specster:meta-spec R-n` writes the version that covers the group.
