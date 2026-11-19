@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 // Specster from the command line, for a terminal or an agent: connects to Specster through the browser and keeps the
-// Personal Token it receives, links a folder to a Project, and writes the agent's rules on its meta-specs and on its
-// Sheets in the folder's CLAUDE.md, then lists its User Stories, creates them and changes their sentences, lists and
-// creates its Releases, changes their groups and Tags, adds to their Interviews and Spec Versions, writes their Notes,
-// archives them and reads them, whole or as a Brief, writes a User Story's Notes, gives it its Labels and archives it,
-// lists and writes the Project's Tasks, marks them done or back to do and links them to its User Stories, and lists,
-// reads, creates and changes the Project's Sheets, gives them their Labels and links them to its Tasks and to its User
-// Stories, through Specster's API, with that token, or the one SPECSTER_TOKEN gives.
+// Personal Token it receives, says whose account it is connected with, revokes and erases that token, links a folder to
+// a Project, and writes the agent's rules on its meta-specs and on its Sheets in the folder's CLAUDE.md, then lists its
+// User Stories, creates them and changes their sentences, lists and creates its Releases, changes their groups and
+// Tags, adds to their Interviews and Spec Versions, writes their Notes, archives them and reads them, whole or as a
+// Brief, writes a User Story's Notes, gives it its Labels and archives it, lists and writes the Project's Tasks, marks
+// them done or back to do and links them to its User Stories, and lists, reads, creates and changes the Project's
+// Sheets, gives them their Labels and links them to its Tasks and to its User Stories, through Specster's API, with
+// that token, or the one SPECSTER_TOKEN gives.
 
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -38,6 +39,8 @@ const USAGE = `Usage :
   specster login [adresse] [--no-browser]
                                       connecte la CLI à Specster par le navigateur, qui s'ouvre sur la page de son
                                       code sauf avec --no-browser, et range son jeton
+  specster status [adresse]           dit avec quel compte, sur quelle adresse et avec quel jeton la CLI est connectée
+  specster logout [adresse]           révoque le jeton rangé, puis l'efface de cette machine
   specster init <adresse du projet>   relie ce dossier au projet, et écrit les sections « Meta-specs » et « Fiches »
                                       de son CLAUDE.md
   specster us list                    affiche les User Stories du projet, archivées comprises, avec leur phrase
@@ -94,7 +97,7 @@ Une User Story se désigne par US-n dans un dossier relié, ou par son adresse.
 Une Release se désigne par R-n dans un dossier relié, ou par son adresse.
 Une tâche se désigne par T-n, dans un dossier relié seulement.
 Une fiche se désigne par F-n dans un dossier relié, ou, pour label add et label remove, par son adresse.
-Sans adresse, login se connecte au Specster du dossier relié, ou à https://specster.fr.
+Sans adresse, login, status et logout prennent le Specster du dossier relié, ou https://specster.fr.
 Connectez la CLI par specster login. Si SPECSTER_TOKEN est défini, il passe avant le jeton rangé.`;
 
 // As Specster's pages show them, such as « 29 octobre 2026 à 15:51 », in Paris time.
@@ -175,6 +178,8 @@ class UserError extends Error {}
 
 const COMMANDS = {
   login,
+  status,
+  logout,
   init,
   "us list": listUserStories,
   "us create": createUserStory,
@@ -263,10 +268,41 @@ async function login(args) {
     });
     throw error;
   }
-  console.log(`Connecté en tant que ${email} sur ${address}. Jeton rangé dans ${store.place}`);
+  // A folder ends the line without a period, which would read as part of its path.
+  const end = store.place.endsWith("/") ? "" : ".";
+  console.log(`Connecté en tant que ${email} sur ${address}. Jeton rangé dans ${store.place}${end}`);
 }
 
-// The address of Specster a command such as login connects to, by its origin: the one given, or else that of the
+// Says whose account the CLI is connected with at the address given, or else of the folder's Project, by the token any
+// command would send there, and where that token comes from: SPECSTER_TOKEN, or where login stored it. Without a token,
+// or with one Specster refuses, it says what any command would.
+async function status(args) {
+  const address = specsterAddress(args);
+  const sent = commandToken(address);
+  const { email } = await api(address, "/api/personal-token", {}, sent);
+  const from = sent.from === "SPECSTER_TOKEN" ? "de SPECSTER_TOKEN" : `rangé dans ${tokenStore().place}`;
+  console.log(`Connecté en tant que ${email} sur ${address}, avec le jeton ${from}.`);
+}
+
+// Revokes the token stored for the address given, or else of the folder's Project, then erases it from the machine,
+// once Specster has revoked it or refuses it already, deleted in « Mon compte » for instance. Any other failure, such as
+// Specster out of reach, keeps it, for logout to be run again. SPECSTER_TOKEN, which login never stored, it leaves as it
+// is, and says so.
+async function logout(args) {
+  const address = specsterAddress(args);
+  const store = tokenStore();
+  const token = store.token(address);
+  if (token) {
+    await request(address, "/api/personal-token", { method: "DELETE", token, ifRefused: null });
+    store.erase(address);
+    console.log(`Déconnecté de ${address} : le jeton est révoqué et effacé de cette machine.`);
+  } else {
+    console.log(`Aucun jeton rangé pour ${address}.`);
+  }
+  if (process.env.SPECSTER_TOKEN) console.log("SPECSTER_TOKEN reste défini : retirez-le vous-même.");
+}
+
+// The address of Specster that login, status and logout connect to, by its origin: the one given, or else that of the
 // folder's link to a Project, or else https://specster.fr. Anything else given, --help included, is refused before any
 // call.
 function specsterAddress(args) {
@@ -1220,9 +1256,9 @@ function commandToken(url) {
 
 // Where the CLI keeps the tokens `login` receives, one for each address of Specster: in the file tokens.json of the
 // folder SPECSTER_CONFIG_DIR names, or else on macOS in the Keychain, and elsewhere in that file of ~/.config/specster/.
-// With SPECSTER_CONFIG_DIR, the Keychain is never run. A store reads the token of an address, or null, stores one, or
-// throws why it can't, and says, as `place`, where it keeps them, as login's last line ends: « le Trousseau. », or a
-// folder with its final slash, the home folder written ~.
+// With SPECSTER_CONFIG_DIR, the Keychain is never run. A store reads the token of an address, or null, stores one or
+// erases one, or throws why it can't, and says, as `place`, where it keeps them, as login and status write it after
+// « dans » : « le Trousseau », or a folder with its final slash, the home folder written ~.
 function tokenStore() {
   const folder = process.env.SPECSTER_CONFIG_DIR;
   if (!folder && process.platform === "darwin") return keychainStore();
@@ -1233,7 +1269,7 @@ function tokenStore() {
 // have it write, without a word, in the session's own, and exit with 0. The token goes to it on its standard input, as
 // a command of `security -i`, never in its arguments, which any program of the machine may list. It is read back once
 // written: a write that failed, or a token read back that isn't the one written, is the Keychain's refusal, after which
-// the token is kept nowhere else.
+// the token is kept nowhere else. Erasing an entry already gone, for which `security` exits with 44, erases nothing.
 function keychainStore() {
   const tokenOf = (address) => {
     // Without an entry for this address, `security` exits with 44, errSecItemNotFound, and says on its standard error
@@ -1244,7 +1280,7 @@ function keychainStore() {
     return token !== "" ? token : null;
   };
   return {
-    place: "le Trousseau.",
+    place: "le Trousseau",
     token: tokenOf,
     store(address, token) {
       const command = securityCommand(["add-generic-password", "-U", "-s", KEYCHAIN_SERVICE, "-a", address, "-w", token]);
@@ -1252,6 +1288,12 @@ function keychainStore() {
         throw new UserError(
           "Le Trousseau a refusé le jeton : définissez SPECSTER_CONFIG_DIR pour le ranger dans un fichier.",
         );
+      }
+    },
+    erase(address) {
+      const { status } = security(["delete-generic-password", "-s", KEYCHAIN_SERVICE, "-a", address]);
+      if (status !== 0 && status !== 44) {
+        throw new UserError("Le jeton est révoqué, mais le Trousseau ne l'a pas effacé : relancez specster logout.");
       }
     },
   };
@@ -1275,7 +1317,8 @@ function securityCommand(args) {
 }
 
 // A file of the tokens by their addresses, in this folder, which only the User may open, and that only they may read:
-// it is written whole to a new file of these rights, which then takes its place, so that it is never seen half written.
+// it is written whole to a new file of these rights, which then takes its place, so that it is never seen half written,
+// when a token is stored as when one is erased.
 function fileStore(folder) {
   const file = path.join(folder, "tokens.json");
   const tokens = () => {
@@ -1286,6 +1329,12 @@ function fileStore(folder) {
       throw error;
     }
   };
+  const write = (written) => {
+    mkdirSync(folder, { recursive: true, mode: 0o700 });
+    const next = path.join(folder, `.tokens.json.${randomUUID()}`);
+    writeFileSync(next, `${JSON.stringify(written, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+    renameSync(next, file);
+  };
   const home = os.homedir();
   return {
     place: `${folder === home || folder.startsWith(home + path.sep) ? `~${folder.slice(home.length)}` : folder}/`,
@@ -1294,19 +1343,20 @@ function fileStore(folder) {
       return typeof token === "string" && token !== "" ? token : null;
     },
     store(address, token) {
-      const written = { ...tokens(), [address]: token };
-      mkdirSync(folder, { recursive: true, mode: 0o700 });
-      const next = path.join(folder, `.tokens.json.${randomUUID()}`);
-      writeFileSync(next, `${JSON.stringify(written, null, 2)}\n`, { mode: 0o600, flag: "wx" });
-      renameSync(next, file);
+      write({ ...tokens(), [address]: token });
+    },
+    erase(address) {
+      const others = tokens();
+      delete others[address];
+      write(others);
     },
   };
 }
 
-// The API's answer, with the token of the command for this address. Without one, the command says to connect the CLI;
-// when Specster refuses it, the command says which token it refused, and what to do.
-async function api(url, apiPath, options = {}) {
-  const sent = commandToken(url);
+// The API's answer, with the token of the command for this address, or the one given as commandToken found it. Without
+// one, the command says to connect the CLI; when Specster refuses it, the command says which token it refused, and what
+// to do.
+async function api(url, apiPath, options = {}, sent = commandToken(url)) {
   if (!sent) throw new UserError(`La CLI n'est pas connectée à ${new URL(url).host} : lancez specster login.`);
   const refused = Symbol("refused");
   const answer = await request(url, apiPath, { ...options, token: sent.token, ifRefused: refused });
