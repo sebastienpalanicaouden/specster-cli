@@ -8,7 +8,7 @@
 // reads, creates and changes the Project's Sheets, gives them their Labels and links them to its Tasks and to its User
 // Stories, through Specster's API, with that token, or the one SPECSTER_TOKEN gives.
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -20,6 +20,19 @@ const CONFIG_FILE = ".specster.json";
 
 // The Specster a command such as login connects to, given no address, in a folder linked to nothing.
 const DEFAULT_ADDRESS = "https://specster.fr";
+
+// The program of macOS that keeps the Keychain, which the CLI runs to store its tokens there and read them back.
+// SPECSTER_SECURITY names another in its place, such as /usr/bin/false, to see by hand what login does when the
+// Keychain refuses, without touching it.
+const SECURITY = process.env.SPECSTER_SECURITY || "/usr/bin/security";
+
+// The service of the CLI's entries in the Keychain, whose account is the address of Specster: one entry for each, apart
+// from the « specster » entry that the User once made by hand.
+const KEYCHAIN_SERVICE = "specster-cli";
+
+// The longest line `security -i` reads as one command: it reads at most 4095 characters, and would run the rest of a
+// longer line as a command of its own.
+const SECURITY_LINE_MAX = 4094;
 
 const USAGE = `Usage :
   specster login [adresse] [--no-browser]
@@ -217,7 +230,9 @@ try {
 // code, opens the browser on its page, where the User checks it and approves, then waits for the token, which it stores
 // for that address. The stored token, checked first, says the CLI is already connected while it works, whatever
 // SPECSTER_TOKEN says. Each line shows as soon as it is printed, for an agent that runs login in the background to read
-// the code at once. The token itself is never printed, nor given to another program.
+// the code at once. The token itself is never printed, nor written in the arguments of a program, and a token it can't
+// store, such as one the Keychain refuses, it revokes at once, rather than leave it in « Jetons personnels » with no CLI
+// to use it, and keeps nowhere else.
 async function login(args) {
   const noBrowser = args.includes("--no-browser");
   const address = specsterAddress(args.filter((arg) => arg !== "--no-browser"));
@@ -239,7 +254,15 @@ async function login(args) {
   console.log(`Vérifiez que la page affiche le code ${requested.userCode}, puis cliquez « Autoriser ».`);
   console.log("En attente de votre autorisation (10 minutes au plus)…");
   const { token, email } = await approvedToken(address, requested);
-  store.store(address, token);
+  try {
+    store.store(address, token);
+  } catch (error) {
+    // Should the revocation fail in turn, Specster out of reach for instance, the store's refusal is still what is said.
+    await request(address, "/api/personal-token", { method: "DELETE", token, ifRefused: null }).catch((refusal) => {
+      if (!(refusal instanceof UserError)) throw refusal;
+    });
+    throw error;
+  }
   console.log(`Connecté en tant que ${email} sur ${address}. Jeton rangé dans ${store.place}`);
 }
 
@@ -1196,11 +1219,59 @@ function commandToken(url) {
 }
 
 // Where the CLI keeps the tokens `login` receives, one for each address of Specster: in the file tokens.json of the
-// folder SPECSTER_CONFIG_DIR names, or of ~/.config/specster/. A store reads the token of an address, or null, stores
-// one, and says, as `place`, where it keeps them, as login's last line ends: a folder with its final slash, the home
-// folder written ~.
+// folder SPECSTER_CONFIG_DIR names, or else on macOS in the Keychain, and elsewhere in that file of ~/.config/specster/.
+// With SPECSTER_CONFIG_DIR, the Keychain is never run. A store reads the token of an address, or null, stores one, or
+// throws why it can't, and says, as `place`, where it keeps them, as login's last line ends: « le Trousseau. », or a
+// folder with its final slash, the home folder written ~.
 function tokenStore() {
-  return fileStore(path.resolve(process.env.SPECSTER_CONFIG_DIR || path.join(os.homedir(), ".config", "specster")));
+  const folder = process.env.SPECSTER_CONFIG_DIR;
+  if (!folder && process.platform === "darwin") return keychainStore();
+  return fileStore(path.resolve(folder || path.join(os.homedir(), ".config", "specster")));
+}
+
+// The User's default Keychain, through `security`, which is never given a keychain's path: one that doesn't exist would
+// have it write, without a word, in the session's own, and exit with 0. The token goes to it on its standard input, as
+// a command of `security -i`, never in its arguments, which any program of the machine may list. It is read back once
+// written: a write that failed, or a token read back that isn't the one written, is the Keychain's refusal, after which
+// the token is kept nowhere else.
+function keychainStore() {
+  const tokenOf = (address) => {
+    // Without an entry for this address, `security` exits with 44, errSecItemNotFound, and says on its standard error
+    // « The specified item could not be found in the keychain. », as delete-generic-password does. That, like any other
+    // failure, such as a Keychain locked out of reach, reads as no token, which login then tries to store.
+    const found = security(["find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", address, "-w"]);
+    const token = found.status === 0 ? found.stdout.replace(/\n$/, "") : "";
+    return token !== "" ? token : null;
+  };
+  return {
+    place: "le Trousseau.",
+    token: tokenOf,
+    store(address, token) {
+      const command = securityCommand(["add-generic-password", "-U", "-s", KEYCHAIN_SERVICE, "-a", address, "-w", token]);
+      if (command === null || security(["-i"], command).status !== 0 || tokenOf(address) !== token) {
+        throw new UserError(
+          "Le Trousseau a refusé le jeton : définissez SPECSTER_CONFIG_DIR pour le ranger dans un fichier.",
+        );
+      }
+    },
+  };
+}
+
+// What `security` answers, run with these arguments and this standard input: its exit code, null when it couldn't run,
+// and what it printed. What it says on its standard error stays out of the terminal.
+function security(args, input = "") {
+  const ran = spawnSync(SECURITY, args, { input, encoding: "utf8" });
+  return { status: ran.error ? null : ran.status, stdout: ran.stdout ?? "" };
+}
+
+// A command as `security -i` reads it on its standard input: one line, ended by the line break that runs it, where each
+// argument stands between double quotes, with a backslash before each double quote and each backslash in it, as
+// `security` splits its lines into arguments. Null when an argument holds anything but printable ASCII, such as a line
+// break, which would end the command early, or when the line is too long to be read whole.
+function securityCommand(args) {
+  if (!args.every((arg) => /^[\x20-\x7e]*$/.test(arg))) return null;
+  const line = args.map((arg) => `"${arg.replace(/["\\]/g, "\\$&")}"`).join(" ");
+  return line.length <= SECURITY_LINE_MAX ? `${line}\n` : null;
 }
 
 // A file of the tokens by their addresses, in this folder, which only the User may open, and that only they may read:
