@@ -17,7 +17,7 @@ These rules hold from now until that grilling is over, after your report as well
 
 Run the CLI as [`../cli.md`](../cli.md) says.
 
-1. **Load**: `specster brief <arguments>`. Its Markdown output is the only basis of the grilling, kept in the conversation: write none of it to disk. When it refuses instead, as it does for `US-n` or a version, relay its message as `cli.md` says and stop there, with no other command and no report.
+1. **Load**: `specster brief <arguments>`. Its Markdown output is the only basis of the grilling, kept in the conversation: write none of it to disk. When it refuses instead, as it does for `US-n` or a version, relay its message as `cli.md` says and stop there, with no other command and no report. A CLI not connected, or a token refused, is the exception: do as `cli.md` says, and load again once connected.
 
    A Brief can be long, as « ## Fiches reliées » gives each Sheet's whole HTML: read a long output as `cli.md` says, before step 2. After a Sheet too large to read whole, go on from the end of its code block to the rest of the Brief; step 3 warns about it.
 
