@@ -1,19 +1,46 @@
 #!/usr/bin/env node
-// Specster from the command line, for a terminal or an agent: links a folder to a Project, and writes the agent's rules
-// on its meta-specs and on its Sheets in the folder's CLAUDE.md, then lists its User Stories, creates them and changes
-// their sentences, lists and creates its Releases, changes their groups and Tags, adds to their Interviews and Spec
-// Versions, writes their Notes, archives them and reads them, whole or as a Brief, writes a User Story's Notes, gives it
-// its Labels and archives it, lists and writes the Project's Tasks, marks them done or back to do and links them to its
-// User Stories, and lists, reads, creates and changes the Project's Sheets, gives them their Labels and links them to its
-// Tasks and to its User Stories, through Specster's API, with the User's Personal Token.
+// Specster from the command line, for a terminal or an agent: connects to Specster through the browser and keeps the
+// Personal Token it receives, says whose account it is connected with, revokes and erases that token, links a folder to
+// a Project, and writes the agent's rules on its meta-specs and on its Sheets in the folder's CLAUDE.md, then lists its
+// User Stories, creates them and changes their sentences, lists and creates its Releases, changes their groups and
+// Tags, adds to their Interviews and Spec Versions, writes their Notes, archives them and reads them, whole or as a
+// Brief, writes a User Story's Notes, gives it its Labels and archives it, lists and writes the Project's Tasks, marks
+// them done or back to do and links them to its User Stories, and lists, reads, creates and changes the Project's
+// Sheets, gives them their Labels and links them to its Tasks and to its User Stories, through Specster's API, with
+// that token, or the one SPECSTER_TOKEN gives.
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 
 // The file that links a folder, and the folders below it, to a Project.
 const CONFIG_FILE = ".specster.json";
 
+// The Specster a command such as login connects to, given no address, in a folder linked to nothing.
+const DEFAULT_ADDRESS = "https://specster.fr";
+
+// The program of macOS that keeps the Keychain, which the CLI runs to store its tokens there and read them back.
+// SPECSTER_SECURITY names another in its place, such as /usr/bin/false, to see by hand what login does when the
+// Keychain refuses, without touching it.
+const SECURITY = process.env.SPECSTER_SECURITY || "/usr/bin/security";
+
+// The service of the CLI's entries in the Keychain, whose account is the address of Specster: one entry for each, apart
+// from the « specster » entry that the User once made by hand.
+const KEYCHAIN_SERVICE = "specster-cli";
+
+// The longest line `security -i` reads as one command: it reads at most 4095 characters, and would run the rest of a
+// longer line as a command of its own.
+const SECURITY_LINE_MAX = 4094;
+
 const USAGE = `Usage :
+  specster login [adresse] [--no-browser]
+                                      connecte la CLI à Specster par le navigateur, qui s'ouvre sur la page de son
+                                      code sauf avec --no-browser, et range son jeton
+  specster status [adresse]           dit avec quel compte, sur quelle adresse et avec quel jeton la CLI est connectée
+  specster logout [adresse]           révoque le jeton rangé, puis l'efface de cette machine
   specster init <adresse du projet>   relie ce dossier au projet, et écrit les sections « Meta-specs » et « Fiches »
                                       de son CLAUDE.md
   specster us list                    affiche les User Stories du projet, archivées comprises, avec leur phrase
@@ -70,7 +97,8 @@ Une User Story se désigne par US-n dans un dossier relié, ou par son adresse.
 Une Release se désigne par R-n dans un dossier relié, ou par son adresse.
 Une tâche se désigne par T-n, dans un dossier relié seulement.
 Une fiche se désigne par F-n dans un dossier relié, ou, pour label add et label remove, par son adresse.
-Le jeton personnel, créé dans « Mon compte », se donne dans la variable SPECSTER_TOKEN.`;
+Sans adresse, login, status et logout prennent le Specster du dossier relié, ou https://specster.fr.
+Connectez la CLI par specster login. Si SPECSTER_TOKEN est défini, il passe avant le jeton rangé.`;
 
 // As Specster's pages show them, such as « 29 octobre 2026 à 15:51 », in Paris time.
 const DATE_FORMAT = new Intl.DateTimeFormat("fr-FR", { dateStyle: "long", timeStyle: "short", timeZone: "Europe/Paris" });
@@ -82,9 +110,9 @@ const DAY_FORMAT = new Intl.DateTimeFormat("fr-FR", { dateStyle: "long", timeZon
 // has a section under one of these headings keeps it, whatever it says.
 const INSTRUCTIONS_FILE = "CLAUDE.md";
 
-// How specs and tickets cite a meta-spec, how an agent loads it, creates User Stories in the words of those already
-// there, notes Tasks, archives a Release once delivered and gives it its Tag: word for word what the README gave to
-// paste by hand.
+// How specs and tickets cite a meta-spec, how an agent loads it, connects the CLI by `specster login` when it isn't,
+// creates User Stories in the words of those already there, notes Tasks, archives a Release once delivered and gives it
+// its Tag: word for word what the README gives to paste by hand.
 const META_SPECS_HEADING = /^### Meta-specs[ \t]*$/m;
 const META_SPECS_SECTION = [
   "### Meta-specs",
@@ -92,10 +120,11 @@ const META_SPECS_SECTION = [
   "A meta-spec is the Spec Version, in Specster, that specifies a Release: a functional spec holding a mockup of each screen it changes. This repo is linked to its Specster Project by `.specster.json`, so `R-n` names a Release there and `US-n` a User Story.",
   "",
   "- A spec or ticket written from a meta-spec opens with « Meta-spec : R-n vN. Elle fait foi pour l'apparence et le comportement de ce qu'elle change, l'app réelle pour le reste de chaque écran, sauf les exceptions écrites ici ; ses commandes de démonstration ne font pas partie de la feature. », naming the exact version, and lists those exceptions. Each ticket repeats the line, for `/implement` reads the ticket alone.",
-  "- Before implementing a ticket that cites a meta-spec, load that version: `specster load R-n vN`, or `npx --yes github:sebastienpalanicaouden/specster-cli load R-n vN` where `specster` isn't installed. It needs the User's Personal Token in `SPECSTER_TOKEN`; without it, ask the User to set it rather than working from the ticket alone. Older specs and tickets name a User Story instead, which `specster load US-n vN` still reads, through its Release.",
-  "- To create a User Story in the linked Project, or change its sentence, run `specster us create`, or `specster us edit US-n`, with the sentence on its standard input, through `npx` and with `SPECSTER_TOKEN` as above. Write the sentence as « En tant que …, je veux …, afin de … », when creating as when editing. When the role, the need or the benefit is missing, ask the User for it rather than inventing it; when all three are there, create or edit without asking for confirmation. Before creating one, run `specster us list` and write the sentence in the words the existing ones use, for the role as for the domain's terms; when one already seems to say the same, name it in one line, such as « US-12 dit déjà : « … ». La créer quand même ? », and create it only once the User says yes.",
-  "- To read the Tasks of the linked Project, run `specster task list`, or `specster task list --done` for those done, through `npx` and with `SPECSTER_TOKEN` as above. When the User asks you to note a Task, add it at once with `specster task add`, its text on its standard input. When, while working, you notice something to do outside your current work, propose it in one line, such as « Ajouter la tâche : … ? », and add it only once the User says yes: unlike a User Story, a Task is never added unasked. When you create a User Story from a Task, link them on your own with `specster task link T-n US-n`. Change a Task's text, delete it, mark it done or back to do (`specster task edit T-n`, `task delete T-n`, `task done T-n`, `task undone T-n`) only when the User asks, never on your own.",
-  "- After merging a PR, archive each Release it delivers, without waiting for the deploy tag. The tickets the PR closed name their Releases (« Meta-spec : R-n vN »). A Release is delivered once its spec and every ticket citing « Meta-spec : R-n » are closed (check each citation is R-n itself, not R-n0); while one of them is open, it stays in progress. For each one delivered, add its delivery Note, give « merged » to it and to each of its User Stories, archive it, and tell the User in one line: `specster note add R-n` with the Note on its standard input, then `specster label add R-n merged`, then `specster label add US-n merged` for each of its User Stories, then `specster release archive R-n`, through `npx` and with `SPECSTER_TOKEN` as above. If a Label can't be given, for instance because its list has no « merged » Label, archive it all the same and say so in that line. Give no other Label unless the User asks. The Note, in French, on this model:",
+  "- Before implementing a ticket that cites a meta-spec, load that version: `specster load R-n vN`, or `npx --yes github:sebastienpalanicaouden/specster-cli load R-n vN` where `specster` isn't installed. When the CLI isn't connected, connect it as below rather than working from the ticket alone. Older specs and tickets name a User Story instead, which `specster load US-n vN` still reads, through its Release.",
+  "- When the CLI says it isn't connected, « La CLI n'est pas connectée à … : lancez specster login. », or that its stored token was refused, « Le jeton rangé a été refusé (supprimé ou révoqué) : lancez specster login. », run `specster login` yourself, in the background, through `npx` as above. Give the User the code it prints, and ask them to check it on the page it opens in their browser, or at the address it prints when it opens none, then to click « Autoriser ». Once it prints « Connecté en tant que … », run your command again and carry on; should it exit with 1 instead, give the User its message. When the CLI says « Le jeton de SPECSTER_TOKEN est refusé : retirez-le ou remplacez-le. », ask the User to remove `SPECSTER_TOKEN` or replace its token, in their own terminal rather than in the conversation: it comes before the token `specster login` stores.",
+  "- To create a User Story in the linked Project, or change its sentence, run `specster us create`, or `specster us edit US-n`, with the sentence on its standard input, through `npx` as above. Write the sentence as « En tant que …, je veux …, afin de … », when creating as when editing. When the role, the need or the benefit is missing, ask the User for it rather than inventing it; when all three are there, create or edit without asking for confirmation. Before creating one, run `specster us list` and write the sentence in the words the existing ones use, for the role as for the domain's terms; when one already seems to say the same, name it in one line, such as « US-12 dit déjà : « … ». La créer quand même ? », and create it only once the User says yes.",
+  "- To read the Tasks of the linked Project, run `specster task list`, or `specster task list --done` for those done, through `npx` as above. When the User asks you to note a Task, add it at once with `specster task add`, its text on its standard input. When, while working, you notice something to do outside your current work, propose it in one line, such as « Ajouter la tâche : … ? », and add it only once the User says yes: unlike a User Story, a Task is never added unasked. When you create a User Story from a Task, link them on your own with `specster task link T-n US-n`. Change a Task's text, delete it, mark it done or back to do (`specster task edit T-n`, `task delete T-n`, `task done T-n`, `task undone T-n`) only when the User asks, never on your own.",
+  "- After merging a PR, archive each Release it delivers, without waiting for the deploy tag. The tickets the PR closed name their Releases (« Meta-spec : R-n vN »). A Release is delivered once its spec and every ticket citing « Meta-spec : R-n » are closed (check each citation is R-n itself, not R-n0); while one of them is open, it stays in progress. For each one delivered, add its delivery Note, give « merged » to it and to each of its User Stories, archive it, and tell the User in one line: `specster note add R-n` with the Note on its standard input, then `specster label add R-n merged`, then `specster label add US-n merged` for each of its User Stories, then `specster release archive R-n`, through `npx` as above. If a Label can't be given, for instance because its list has no « merged » Label, archive it all the same and say so in that line. Give no other Label unless the User asks. The Note, in French, on this model:",
   "",
   "  ```",
   "  Livrée par la PR #52 (https://github.com/…/pull/52), squash-mergée en 9b1c2e4, d'après la meta-spec R-3 v2.",
@@ -114,7 +143,7 @@ const SHEETS_HEADING = /^### Fiches[ \t]*$/m;
 const SHEETS_SECTION = [
   "### Fiches",
   "",
-  "A Sheet, « Fiche » on screen, is a title and an HTML document that the linked Specster Project keeps outside any Release, such as an audit or a research; `F-n` names one there. Its commands are `specster sheet …`, or `npx --yes github:sebastienpalanicaouden/specster-cli sheet …` where `specster` isn't installed, with the User's Personal Token in `SPECSTER_TOKEN`; without it, ask the User to set it.",
+  "A Sheet, « Fiche » on screen, is a title and an HTML document that the linked Specster Project keeps outside any Release, such as an audit or a research; `F-n` names one there. Its commands are `specster sheet …`, or `npx --yes github:sebastienpalanicaouden/specster-cli sheet …` where `specster` isn't installed; when the CLI says it isn't connected, or that a token was refused, do as « Meta-specs » says.",
   "",
   "- Create a Sheet, or change one, when the User asks: `specster sheet create --title \"<title>\"`, its HTML on the standard input, and `specster sheet edit F-n`, with `--title \"<title>\"` for a new title, an HTML on the standard input for a new HTML, or both. When, while working, you produce something worth keeping as a Sheet, or see one to change, propose it in one line, such as « Enregistrer une Fiche : … ? », and act only once the User says yes.",
   "- A Sheet has no versions: `sheet edit` replaces its HTML without a question, and the old one is lost. So before each replacement, even one the User asked for, ask for their agreement in the conversation, recalling that the HTML the Sheet has will be lost. One agreement covers one replacement: ask again for the next. A title changed alone loses nothing, so it takes no such question.",
@@ -139,10 +168,19 @@ const COLOR_NAMES = new Map([
   ["pink", "rose"],
 ]);
 
+// What a command says when Specster refuses its token, by where the token comes from.
+const TOKEN_REFUSED = {
+  SPECSTER_TOKEN: "Le jeton de SPECSTER_TOKEN est refusé : retirez-le ou remplacez-le.",
+  stored: "Le jeton rangé a été refusé (supprimé ou révoqué) : lancez specster login.",
+};
+
 // A message for the User, printed as it is, without a stack trace.
 class UserError extends Error {}
 
 const COMMANDS = {
+  login,
+  status,
+  logout,
   init,
   "us list": listUserStories,
   "us create": createUserStory,
@@ -192,6 +230,148 @@ try {
   if (!(error instanceof UserError)) throw error;
   console.error(error.message);
   process.exitCode = 1;
+}
+
+// Connects the CLI to Specster through the browser, at the address given, or else of the folder's Project: asks for a
+// code, opens the browser on its page, where the User checks it and approves, then waits for the token, which it stores
+// for that address. The stored token, checked first, says the CLI is already connected while it works, whatever
+// SPECSTER_TOKEN says. Each line shows as soon as it is printed, for an agent that runs login in the background to read
+// the code at once. The token itself is never printed, nor written in the arguments of a program, and a token it can't
+// store, such as one the Keychain refuses, it revokes at once, rather than leave it in « Jetons personnels » with no CLI
+// to use it, and keeps nowhere else.
+async function login(args) {
+  const noBrowser = args.includes("--no-browser");
+  const address = specsterAddress(args.filter((arg) => arg !== "--no-browser"));
+  const store = tokenStore();
+  const stored = store.token(address);
+  const account = stored && (await accountOf(address, stored));
+  if (account) {
+    console.log(`Déjà connecté en tant que ${account.email} sur ${address}.`);
+    return;
+  }
+  const requested = await request(address, "/api/cli-login", {
+    method: "POST",
+    body: JSON.stringify({ machine: os.hostname().replace(/\.local$/, "") }),
+    contentType: "application/json",
+  });
+  const page = `${address}/cli?code=${encodeURIComponent(requested.userCode)}`;
+  const opened = !noBrowser && (await openedInBrowser(page));
+  console.log(opened ? `Ouverture du navigateur sur ${page}` : `Ouvrez ${page} dans votre navigateur.`);
+  console.log(`Vérifiez que la page affiche le code ${requested.userCode}, puis cliquez « Autoriser ».`);
+  console.log("En attente de votre autorisation (10 minutes au plus)…");
+  const { token, email } = await approvedToken(address, requested);
+  try {
+    store.store(address, token);
+  } catch (error) {
+    // Should the revocation fail in turn, Specster out of reach for instance, the store's refusal is still what is said.
+    await revoke(address, token).catch((refusal) => {
+      if (!(refusal instanceof UserError)) throw refusal;
+    });
+    throw error;
+  }
+  // A folder ends the line without a period, which would read as part of its path.
+  const end = store.place.endsWith("/") ? "" : ".";
+  console.log(`Connecté en tant que ${email} sur ${address}. Jeton rangé dans ${store.place}${end}`);
+}
+
+// Says whose account the CLI is connected with at the address given, or else of the folder's Project, by the token any
+// command would send there, and where that token comes from: SPECSTER_TOKEN, or where login stored it. Without a token,
+// or with one Specster refuses, it says what any command would.
+async function status(args) {
+  const address = specsterAddress(args);
+  const sent = commandToken(address);
+  const { email } = await api(address, "/api/personal-token", {}, sent);
+  const from = sent.from === "SPECSTER_TOKEN" ? "de SPECSTER_TOKEN" : `rangé dans ${tokenStore().place}`;
+  console.log(`Connecté en tant que ${email} sur ${address}, avec le jeton ${from}.`);
+}
+
+// Revokes the token stored for the address given, or else of the folder's Project, then erases it from the machine,
+// once Specster has revoked it or refuses it already, deleted in « Mon compte » for instance. Any other failure, such as
+// Specster out of reach, keeps it, for logout to be run again. SPECSTER_TOKEN, which login never stored, it leaves as it
+// is, and says so.
+async function logout(args) {
+  const address = specsterAddress(args);
+  const store = tokenStore();
+  const token = store.token(address);
+  if (token) {
+    await revoke(address, token);
+    store.erase(address);
+    console.log(`Déconnecté de ${address} : le jeton est révoqué et effacé de cette machine.`);
+  } else {
+    console.log(`Aucun jeton rangé pour ${address}.`);
+  }
+  if (process.env.SPECSTER_TOKEN) console.log("SPECSTER_TOKEN reste défini : retirez-le vous-même.");
+}
+
+// The address of Specster that login, status and logout connect to, by its origin: the one given, or else that of the
+// folder's link to a Project, or else https://specster.fr. Anything else given, --help included, is refused before any
+// call.
+function specsterAddress(args) {
+  if (args.length === 0) {
+    const link = folderLink();
+    return link ? new URL(link.url).origin : DEFAULT_ADDRESS;
+  }
+  const given = args.length === 1 && URL.canParse(args[0]) ? new URL(args[0]) : null;
+  if (!given || (given.protocol !== "https:" && given.protocol !== "http:")) {
+    throw new UserError(`Donnez l'adresse de Specster, comme https://specster.fr.\n\n${USAGE}`);
+  }
+  return given.origin;
+}
+
+// The account Specster at this address says the token is of, its email for one, or null when it refuses the token.
+function accountOf(address, token) {
+  return request(address, "/api/personal-token", { token, ifRefused: null });
+}
+
+// Revokes the token at Specster at this address, which then refuses it. A token it refuses already, deleted in « Mon
+// compte » for instance, counts as revoked.
+function revoke(address, token) {
+  return request(address, "/api/personal-token", { method: "DELETE", token, ifRefused: null });
+}
+
+// Whether the browser opened the page: on macOS by `open`, elsewhere by `xdg-open`, and only with a screen, which an
+// SSH session lacks, rather than have a text browser take over the terminal. A failure counts as nothing opened. A
+// browser that `xdg-open` starts and waits for is left running, opened.
+function openedInBrowser(page) {
+  const opener =
+    process.platform === "darwin" ? "open" : process.env.DISPLAY || process.env.WAYLAND_DISPLAY ? "xdg-open" : null;
+  if (!opener) return false;
+  return new Promise((resolve) => {
+    const child = spawn(opener, [page], { stdio: "ignore", detached: true });
+    const stillOpening = setTimeout(() => {
+      child.unref();
+      resolve(true);
+    }, 3000);
+    child.on("error", () => {
+      clearTimeout(stillOpening);
+      resolve(false);
+    });
+    child.on("exit", (code) => {
+      clearTimeout(stillOpening);
+      resolve(code === 0);
+    });
+  });
+}
+
+// The token and the User's email, once the User approves the code: asks Specster every `interval` seconds, 5 more after
+// each time it says to slow down, and for `expiresIn` seconds at most. The User's refusal, or the code expired on
+// Specster's side, comes as Specster's message.
+async function approvedToken(address, { deviceCode, expiresIn, interval }) {
+  const deadline = Date.now() + expiresIn * 1000;
+  for (let wait = interval * 1000; ; ) {
+    if (Date.now() + wait > deadline) {
+      await sleep(Math.max(0, deadline - Date.now()));
+      throw new UserError("Le code a expiré : relancez specster login.");
+    }
+    await sleep(wait);
+    const answer = await request(address, "/api/cli-login/token", {
+      method: "POST",
+      body: JSON.stringify({ deviceCode }),
+      contentType: "application/json",
+    });
+    if (answer.token) return answer;
+    if (answer.status === "slow-down") wait += 5000;
+  }
 }
 
 // Writes the folder's link to the Project whose address the User copied from their browser, and the « Meta-specs » and
@@ -1061,25 +1241,183 @@ async function standardInput() {
 
 // The Project the current folder, or the nearest one above it, was linked to with init.
 function linkedProject() {
+  const link = folderLink();
+  if (!link) {
+    throw new UserError("Ce dossier n'est relié à aucun projet : lancez d'abord specster init <adresse du projet>.");
+  }
+  return link;
+}
+
+// What init wrote in the current folder, or in the nearest one above it: the address of Specster and the Project. Null
+// in a folder linked to nothing.
+function folderLink() {
   for (let folder = process.cwd(); ; folder = path.dirname(folder)) {
     const file = path.join(folder, CONFIG_FILE);
     if (existsSync(file)) return JSON.parse(readFileSync(file, "utf8"));
-    if (folder === path.dirname(folder)) {
-      throw new UserError("Ce dossier n'est relié à aucun projet : lancez d'abord specster init <adresse du projet>.");
-    }
+    if (folder === path.dirname(folder)) return null;
   }
 }
 
-// The API's answer, read as JSON unless asked for as text or as bytes. Its errors come with a message for the User, in French,
-// but for a 404 when `ifNotFound` is given, which it answers instead: a path a Specster older than the CLI doesn't serve.
-async function api(url, apiPath, { method = "GET", body, contentType, as = "json", ifNotFound } = {}) {
-  const token = process.env.SPECSTER_TOKEN;
-  if (!token) {
-    throw new UserError(
-      "Donnez votre jeton personnel dans la variable SPECSTER_TOKEN : créez-le dans Specster, « Mon compte », « Jetons personnels ».",
-    );
-  }
-  const headers = { Authorization: `Bearer ${token}`, ...(contentType && { "Content-Type": contentType }) };
+// The token a command sends to Specster at this address, and where it comes from: SPECSTER_TOKEN when it is set and not
+// empty, or else the one `login` stored for this address. Null without either.
+function commandToken(url) {
+  if (process.env.SPECSTER_TOKEN) return { token: process.env.SPECSTER_TOKEN, from: "SPECSTER_TOKEN" };
+  const token = tokenStore().token(new URL(url).origin);
+  return token ? { token, from: "stored" } : null;
+}
+
+// Where the CLI keeps the tokens `login` receives, one for each address of Specster: in the file tokens.json of the
+// folder SPECSTER_CONFIG_DIR names, or else on macOS in the Keychain, and elsewhere in that file of ~/.config/specster/.
+// With SPECSTER_CONFIG_DIR, the Keychain is never run. A store reads the token of an address, or null, stores one or
+// erases one, or throws, as a message for the User, why it can't, and says, as `place`, where it keeps them, as login
+// and status write it after « dans » : « le Trousseau », or a folder with its final slash, the home folder written ~.
+function tokenStore() {
+  const folder = process.env.SPECSTER_CONFIG_DIR;
+  if (!folder && process.platform === "darwin") return keychainStore();
+  return fileStore(path.resolve(folder || path.join(os.homedir(), ".config", "specster")));
+}
+
+// The User's default Keychain, through `security`, which is never given a keychain's path: one that doesn't exist would
+// have it write, without a word, in the session's own, and exit with 0. The token goes to it on its standard input, as
+// a command of `security -i`, never in its arguments, which any program of the machine may list. It is read back once
+// written: a write that failed, or a token read back that isn't the one written, is the Keychain's refusal, after which
+// the token is kept nowhere else. Erasing an entry already gone, for which `security` exits with 44, erases nothing.
+function keychainStore() {
+  const tokenOf = (address) => {
+    // Without an entry for this address, `security` exits with 44, errSecItemNotFound, and says on its standard error
+    // « The specified item could not be found in the keychain. », as delete-generic-password does. That, like any other
+    // failure, such as a Keychain locked out of reach, reads as no token, which login then tries to store.
+    const found = security(["find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", address, "-w"]);
+    const token = found.status === 0 ? found.stdout.replace(/\n$/, "") : "";
+    return token !== "" ? token : null;
+  };
+  return {
+    place: "le Trousseau",
+    token: tokenOf,
+    store(address, token) {
+      const command = securityCommand(["add-generic-password", "-U", "-s", KEYCHAIN_SERVICE, "-a", address, "-w", token]);
+      if (command === null || security(["-i"], command).status !== 0 || tokenOf(address) !== token) {
+        throw new UserError(
+          "Le Trousseau a refusé le jeton : définissez SPECSTER_CONFIG_DIR pour le ranger dans un fichier.",
+        );
+      }
+    },
+    erase(address) {
+      const { status } = security(["delete-generic-password", "-s", KEYCHAIN_SERVICE, "-a", address]);
+      if (status !== 0 && status !== 44) {
+        throw new UserError("Le jeton est révoqué, mais le Trousseau ne l'a pas effacé : relancez specster logout.");
+      }
+    },
+  };
+}
+
+// What `security` answers, run with these arguments and this standard input: its exit code, null when it couldn't run,
+// and what it printed. What it says on its standard error stays out of the terminal.
+function security(args, input = "") {
+  const ran = spawnSync(SECURITY, args, { input, encoding: "utf8" });
+  return { status: ran.error ? null : ran.status, stdout: ran.stdout ?? "" };
+}
+
+// A command as `security -i` reads it on its standard input: one line, ended by the line break that runs it, where each
+// argument stands between double quotes, with a backslash before each double quote and each backslash in it, as
+// `security` splits its lines into arguments. Null when an argument holds anything but printable ASCII, such as a line
+// break, which would end the command early, or when the line is too long to be read whole.
+function securityCommand(args) {
+  if (!args.every((arg) => /^[\x20-\x7e]*$/.test(arg))) return null;
+  const line = args.map((arg) => `"${arg.replace(/["\\]/g, "\\$&")}"`).join(" ");
+  return line.length <= SECURITY_LINE_MAX ? `${line}\n` : null;
+}
+
+// A file of the tokens by their addresses, in this folder, which only the User may open, and that only they may read:
+// it is written whole to a new file of these rights, which then takes its place, so that it is never seen half written,
+// when a token is stored as when one is erased. A file it can't read, or that isn't an object of JSON, and a folder it
+// can't write in, it says, with the system's reason; the new file, which holds the tokens, it never leaves behind.
+function fileStore(folder) {
+  const home = os.homedir();
+  const place = `${folder === home || folder.startsWith(home + path.sep) ? `~${folder.slice(home.length)}` : folder}/`;
+  const file = path.join(folder, "tokens.json");
+  const unreadable = (reason) => new UserError(`La CLI ne peut pas lire ${place}tokens.json : ${reason}.`);
+  const tokens = () => {
+    let text;
+    try {
+      text = readFileSync(file, "utf8");
+    } catch (error) {
+      if (error.code === "ENOENT") return {};
+      throw unreadable(systemReason(error));
+    }
+    try {
+      const read = JSON.parse(text);
+      if (typeof read === "object" && read !== null && !Array.isArray(read)) return read;
+    } catch {
+      // Not JSON, which is not an object of JSON either.
+    }
+    throw unreadable("ce n'est pas un objet JSON");
+  };
+  // What it throws when the write fails is the message `refused` makes of the system's reason.
+  const write = (written, refused) => {
+    const next = path.join(folder, `.tokens.json.${randomUUID()}`);
+    try {
+      mkdirSync(folder, { recursive: true, mode: 0o700 });
+      writeFileSync(next, `${JSON.stringify(written, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+      renameSync(next, file);
+    } catch (error) {
+      try {
+        unlinkSync(next);
+      } catch {
+        // Never created, or out of reach in a folder it can't write in.
+      }
+      throw new UserError(refused(systemReason(error)));
+    }
+  };
+  return {
+    place,
+    token(address) {
+      const token = tokens()[address];
+      return typeof token === "string" && token !== "" ? token : null;
+    },
+    store(address, token) {
+      const written = { ...tokens(), [address]: token };
+      write(written, (reason) => `La CLI ne peut pas ranger le jeton dans ${place} : ${reason}.`);
+    },
+    erase(address) {
+      const others = tokens();
+      delete others[address];
+      write(
+        others,
+        (reason) =>
+          `Le jeton est révoqué, mais la CLI ne peut pas l'effacer de ${place}tokens.json (${reason}) : relancez specster logout.`,
+      );
+    },
+  };
+}
+
+// Why the system refused a call on a file, as it says it, without the code, the call and the path its message gives
+// around it: « permission denied » of « EACCES: permission denied, open '…' ».
+function systemReason(error) {
+  return /^[A-Z][A-Z0-9]*: (.+?), [a-z]+(?: '|$)/.exec(error.message)?.[1] ?? error.message;
+}
+
+// The API's answer, with the token of the command for this address, or the one given as commandToken found it. Without
+// one, the command says to connect the CLI; when Specster refuses it, the command says which token it refused, and what
+// to do.
+async function api(url, apiPath, options = {}, sent = commandToken(url)) {
+  if (!sent) throw new UserError(`La CLI n'est pas connectée à ${new URL(url).host} : lancez specster login.`);
+  const refused = Symbol("refused");
+  const answer = await request(url, apiPath, { ...options, token: sent.token, ifRefused: refused });
+  if (answer === refused) throw new UserError(TOKEN_REFUSED[sent.from]);
+  return answer;
+}
+
+// Specster's answer, read as JSON unless asked for as text or as bytes, to a request sent with the token, if one is
+// given. Its errors come with a message for the User, in French, but for a 404 when `ifNotFound` is given, which it
+// answers instead: a path a Specster older than the CLI doesn't serve; and for a 401, the token refused, when
+// `ifRefused` is.
+async function request(url, apiPath, options = {}) {
+  const { method = "GET", body, contentType, as = "json", token, ifNotFound, ifRefused } = options;
+  const headers = {
+    ...(token && { Authorization: `Bearer ${token}` }),
+    ...(contentType && { "Content-Type": contentType }),
+  };
   let response;
   try {
     response = await fetch(url + apiPath, { method, headers, body });
@@ -1088,6 +1426,7 @@ async function api(url, apiPath, { method = "GET", body, contentType, as = "json
   }
   if (!response.ok) {
     if (response.status === 404 && ifNotFound !== undefined) return ifNotFound;
+    if (response.status === 401 && ifRefused !== undefined) return ifRefused;
     const error = await response.json().catch(() => null);
     if (error?.error) throw new UserError(error.error);
     // A path Specster doesn't serve answers with a page, not with a message, and a method it doesn't serve on a path with
