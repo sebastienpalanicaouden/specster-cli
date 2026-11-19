@@ -244,7 +244,7 @@ async function login(args) {
   const address = specsterAddress(args.filter((arg) => arg !== "--no-browser"));
   const store = tokenStore();
   const stored = store.token(address);
-  const account = stored && (await request(address, "/api/personal-token", { token: stored, ifRefused: null }));
+  const account = stored && (await accountOf(address, stored));
   if (account) {
     console.log(`Déjà connecté en tant que ${account.email} sur ${address}.`);
     return;
@@ -264,7 +264,7 @@ async function login(args) {
     store.store(address, token);
   } catch (error) {
     // Should the revocation fail in turn, Specster out of reach for instance, the store's refusal is still what is said.
-    await request(address, "/api/personal-token", { method: "DELETE", token, ifRefused: null }).catch((refusal) => {
+    await revoke(address, token).catch((refusal) => {
       if (!(refusal instanceof UserError)) throw refusal;
     });
     throw error;
@@ -294,7 +294,7 @@ async function logout(args) {
   const store = tokenStore();
   const token = store.token(address);
   if (token) {
-    await request(address, "/api/personal-token", { method: "DELETE", token, ifRefused: null });
+    await revoke(address, token);
     store.erase(address);
     console.log(`Déconnecté de ${address} : le jeton est révoqué et effacé de cette machine.`);
   } else {
@@ -316,6 +316,17 @@ function specsterAddress(args) {
     throw new UserError(`Donnez l'adresse de Specster, comme https://specster.fr.\n\n${USAGE}`);
   }
   return given.origin;
+}
+
+// The account Specster at this address says the token is of, its email for one, or null when it refuses the token.
+function accountOf(address, token) {
+  return request(address, "/api/personal-token", { token, ifRefused: null });
+}
+
+// Revokes the token at Specster at this address, which then refuses it. A token it refuses already, deleted in « Mon
+// compte » for instance, counts as revoked.
+function revoke(address, token) {
+  return request(address, "/api/personal-token", { method: "DELETE", token, ifRefused: null });
 }
 
 // Whether the browser opened the page: on macOS by `open`, elsewhere by `xdg-open`, and only with a screen, which an
