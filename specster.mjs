@@ -11,7 +11,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -1258,8 +1258,8 @@ function commandToken(url) {
 // Where the CLI keeps the tokens `login` receives, one for each address of Specster: in the file tokens.json of the
 // folder SPECSTER_CONFIG_DIR names, or else on macOS in the Keychain, and elsewhere in that file of ~/.config/specster/.
 // With SPECSTER_CONFIG_DIR, the Keychain is never run. A store reads the token of an address, or null, stores one or
-// erases one, or throws why it can't, and says, as `place`, where it keeps them, as login and status write it after
-// « dans » : « le Trousseau », or a folder with its final slash, the home folder written ~.
+// erases one, or throws, as a message for the User, why it can't, and says, as `place`, where it keeps them, as login
+// and status write it after « dans » : « le Trousseau », or a folder with its final slash, the home folder written ~.
 function tokenStore() {
   const folder = process.env.SPECSTER_CONFIG_DIR;
   if (!folder && process.platform === "darwin") return keychainStore();
@@ -1319,39 +1319,71 @@ function securityCommand(args) {
 
 // A file of the tokens by their addresses, in this folder, which only the User may open, and that only they may read:
 // it is written whole to a new file of these rights, which then takes its place, so that it is never seen half written,
-// when a token is stored as when one is erased.
+// when a token is stored as when one is erased. A file it can't read, or that isn't an object of JSON, and a folder it
+// can't write in, it says, with the system's reason; the new file, which holds the tokens, it never leaves behind.
 function fileStore(folder) {
+  const home = os.homedir();
+  const place = `${folder === home || folder.startsWith(home + path.sep) ? `~${folder.slice(home.length)}` : folder}/`;
   const file = path.join(folder, "tokens.json");
+  const unreadable = (reason) => new UserError(`La CLI ne peut pas lire ${place}tokens.json : ${reason}.`);
   const tokens = () => {
+    let text;
     try {
-      return JSON.parse(readFileSync(file, "utf8"));
+      text = readFileSync(file, "utf8");
     } catch (error) {
       if (error.code === "ENOENT") return {};
-      throw error;
+      throw unreadable(systemReason(error));
+    }
+    try {
+      const read = JSON.parse(text);
+      if (typeof read === "object" && read !== null && !Array.isArray(read)) return read;
+    } catch {
+      // Not JSON, which is not an object of JSON either.
+    }
+    throw unreadable("ce n'est pas un objet JSON");
+  };
+  // What it throws when the write fails is the message `refused` makes of the system's reason.
+  const write = (written, refused) => {
+    const next = path.join(folder, `.tokens.json.${randomUUID()}`);
+    try {
+      mkdirSync(folder, { recursive: true, mode: 0o700 });
+      writeFileSync(next, `${JSON.stringify(written, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+      renameSync(next, file);
+    } catch (error) {
+      try {
+        unlinkSync(next);
+      } catch {
+        // Never created, or out of reach in a folder it can't write in.
+      }
+      throw new UserError(refused(systemReason(error)));
     }
   };
-  const write = (written) => {
-    mkdirSync(folder, { recursive: true, mode: 0o700 });
-    const next = path.join(folder, `.tokens.json.${randomUUID()}`);
-    writeFileSync(next, `${JSON.stringify(written, null, 2)}\n`, { mode: 0o600, flag: "wx" });
-    renameSync(next, file);
-  };
-  const home = os.homedir();
   return {
-    place: `${folder === home || folder.startsWith(home + path.sep) ? `~${folder.slice(home.length)}` : folder}/`,
+    place,
     token(address) {
       const token = tokens()[address];
       return typeof token === "string" && token !== "" ? token : null;
     },
     store(address, token) {
-      write({ ...tokens(), [address]: token });
+      const written = { ...tokens(), [address]: token };
+      write(written, (reason) => `La CLI ne peut pas ranger le jeton dans ${place} : ${reason}.`);
     },
     erase(address) {
       const others = tokens();
       delete others[address];
-      write(others);
+      write(
+        others,
+        (reason) =>
+          `Le jeton est révoqué, mais la CLI ne peut pas l'effacer de ${place}tokens.json (${reason}) : relancez specster logout.`,
+      );
     },
   };
+}
+
+// Why the system refused a call on a file, as it says it, without the code, the call and the path its message gives
+// around it: « permission denied » of « EACCES: permission denied, open '…' ».
+function systemReason(error) {
+  return /^[A-Z][A-Z0-9]*: (.+?), [a-z]+(?: '|$)/.exec(error.message)?.[1] ?? error.message;
 }
 
 // The API's answer, with the token of the command for this address, or the one given as commandToken found it. Without
