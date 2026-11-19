@@ -1,6 +1,6 @@
 # specster-cli
 
-[Specster](https://specster.fr) from the command line, for a terminal or an agent such as Claude Code: link a folder to a Project, list its User Stories, create them and change their sentences, group them in Releases, read and add to a Release's Interview and Spec Versions, give it a Tag, write the Notes of a Release or a User Story, give them their Labels and archive them, and note the Project's Tasks, mark them done and link them to its User Stories, and list, read, create and change its Sheets, give them their Labels and link them to its Tasks and to its User Stories, those of a Release's User Stories named when it is loaded and given with their HTML in its Brief. A single file with no dependencies, for Node.js 20 or later.
+[Specster](https://specster.fr) from the command line, for a terminal or an agent such as Claude Code: connect it to Specster through your browser, link a folder to a Project, list its User Stories, create them and change their sentences, group them in Releases, read and add to a Release's Interview and Spec Versions, give it a Tag, write the Notes of a Release or a User Story, give them their Labels and archive them, and note the Project's Tasks, mark them done and link them to its User Stories, and list, read, create and change its Sheets, give them their Labels and link them to its Tasks and to its User Stories, those of a Release's User Stories named when it is loaded and given with their HTML in its Brief. A single file with no dependencies, for Node.js 20 or later.
 
 ## Run it
 
@@ -19,40 +19,66 @@ specster <command>
 
 ## Sign in
 
-The CLI, and the plugin through it, act for you with a Personal Token, read from `SPECSTER_TOKEN`. Set it up once on each computer:
+The CLI, and the plugin through it, act for you with a Personal Token, which `specster login` gets through your browser and stores itself, once on each computer:
 
-1. **Create the token.** In Specster, « Mon compte », « Jetons personnels », name it after the computer, such as « MacBook », and click « Créer le jeton ». Copy it at once: it starts with `specster_` and is shown only this once.
-2. **Store it**, from the Terminal app. Each command below reads the token without showing it, which needs a real terminal: Claude Code's `!` prefix won't do. They are written for zsh, macOS's default shell (`echo $SHELL` prints `/bin/zsh`). Pick one way:
+```sh
+specster login
+```
 
-   - **In the macOS Keychain** (recommended), where the token is written nowhere in plain text:
+It asks Specster for a code, opens your browser on the page of that code, « Connecter la CLI », and prints, line by line:
 
-     ```sh
-     security add-generic-password -a "$USER" -s specster -w
-     print -r -- 'export SPECSTER_TOKEN=$(security find-generic-password -a "$USER" -s specster -w)' >> ~/.zshrc
-     ```
+```
+Ouverture du navigateur sur https://specster.fr/cli?code=WDJB-MJHT
+Vérifiez que la page affiche le code WDJB-MJHT, puis cliquez « Autoriser ».
+En attente de votre autorisation (10 minutes au plus)…
+```
 
-     The first command asks for the token twice: paste it each time, nothing shows. The second adds to `~/.zshrc` the line that reads it back from the Keychain whenever a shell starts.
+On that page, signing in first if Specster asks, check that it shows the same code and the name of your computer, and click « Autoriser ». The terminal then says « Connecté en tant que camille@popote.fr sur https://specster.fr. Jeton rangé dans le Trousseau. ». The token shows in « Mon compte », « Jetons personnels », under the name the page gave it, « CLI · <computer> » unless you changed it there, and is deleted there as the others are. « Refuser » ends `login` on « Connexion refusée dans le navigateur. », and 10 minutes without an answer on « Le code a expiré : relancez specster login. ». One address gets at most 10 codes an hour, past which `login` stops on « Trop de demandes de code : réessayez dans une heure. ».
 
-   - **In plain text in `~/.zshrc`**:
+The token is never printed, nor written in a program's arguments. On a Mac, unless `SPECSTER_CONFIG_DIR` is set, it goes to your default Keychain, as an entry of service `specster-cli` whose account is the address of Specster. Elsewhere, it goes to `~/.config/specster/tokens.json`, a file only you can read (0600), in a folder only you can open (0700), and the last line ends on « Jeton rangé dans ~/.config/specster/ ». Every command reads it back from there: there is no line to add to `~/.zshrc`, nor Claude Code to restart. Should the Keychain refuse the token, `login` revokes it at once, stores it nowhere else, and stops on « Le Trousseau a refusé le jeton : définissez SPECSTER_CONFIG_DIR pour le ranger dans un fichier. ».
 
-     ```sh
-     read -rs "token?Jeton Specster : " && print -r -- "export SPECSTER_TOKEN=$token" >> ~/.zshrc && unset token; echo
-     ```
+`login`, `status` and `logout` take the address of a Specster, whose origin alone counts, such as `specster login http://localhost:3000`; without one, that of the folder's Project, linked by `init`, or else https://specster.fr. Anything else, `--help` included, gets « Donnez l'adresse de Specster, comme https://specster.fr. » and the usage. The CLI stores one token for each address, and every other command sends the one of the address it acts on, that of the linked folder or of the Release or User Story given by its address, unless `SPECSTER_TOKEN` is set.
 
-     Once `Jeton Specster : ` shows, paste the token and press Enter: nothing shows, and the token stays out of the shell's history.
+Already connected with a token that works, `login` says « Déjà connecté en tant que camille@popote.fr sur https://specster.fr. » and stops: to change accounts, run `specster logout`, then `specster login`. Without a token, a command says « La CLI n'est pas connectée à specster.fr : lancez specster login. », the host with its port, such as `localhost:3000`. When Specster refuses the stored token, deleted in « Mon compte » or by an Administrator's `user:reset-password`, which deletes them all, it says « Le jeton rangé a été refusé (supprimé ou révoqué) : lancez specster login. », and `login` connects again.
 
-3. **Check**: `source ~/.zshrc && echo "${SPECSTER_TOKEN:0:9}"` prints `specster_`. If it prints nothing, `grep SPECSTER_TOKEN ~/.zshrc` shows the line you added, which may hold an empty token.
-4. **Restart Claude Code**, this once: it reads the environment when it starts, so a session already open lacks the token. Every terminal and session after that has it, with nothing to paste.
+`specster status` says whose account the CLI is connected with, on which address, and where its token comes from: « Connecté en tant que camille@popote.fr sur https://specster.fr, avec le jeton rangé dans le Trousseau. », « …, avec le jeton rangé dans ~/.config/specster/. » or « …, avec le jeton de SPECSTER_TOKEN. ». Without a token, or with one refused, it says what any command would.
 
-Then `specster load R-n` in a linked folder prints the Release.
+`specster logout` revokes the stored token in Specster, where it leaves « Jetons personnels », then erases it from this computer: « Déconnecté de https://specster.fr : le jeton est révoqué et effacé de cette machine. ». A token already deleted in « Mon compte » is erased all the same. Should Specster not answer, `logout` keeps the token and stops on the error, to be run again; should the Keychain fail to erase it, it stops on « Le jeton est révoqué, mais le Trousseau ne l'a pas effacé : relancez specster logout. ». Without a stored token, it says « Aucun jeton rangé pour https://specster.fr. ». With `SPECSTER_TOKEN` set, which it neither sends nor touches, it adds « SPECSTER_TOKEN reste défini : retirez-le vous-même. ».
 
-**Replacing the token**, after deleting it in « Mon compte », or after an Administrator's `user:reset-password`, which deletes them all: create a new one and store it the same way. In the Keychain, add `-U` to the first command (`security add-generic-password -U -a "$USER" -s specster -w`); in plain text, replace the line in `~/.zshrc`. Then restart Claude Code again.
+What `login`, `status` and `logout` say goes to the standard output, line by line, « Déjà connecté » and « Aucun jeton rangé » included, with 0; what they refuse, to the standard error, with 1. An agent following the rules that `init` writes, or the plugin, runs `specster login` itself, in the background, when the CLI isn't connected: it gives you the code to check on the page before you click « Autoriser ».
 
-Keep the token out of commits, and out of conversations with an agent, where it would stay in the transcript: whoever has it can read and change your Projects until you delete it.
+### On Ubuntu
+
+`specster login` works the same, the token going to `~/.config/specster/tokens.json`. With a screen, `DISPLAY` or `WAYLAND_DISPLAY` set, the CLI opens the page with `xdg-open`. Without one, as over SSH, it opens nothing, rather than start a text browser in the terminal, and its first line becomes:
+
+```
+Ouvrez https://specster.fr/cli?code=WDJB-MJHT dans votre navigateur.
+```
+
+Open that address in a browser on any computer, check the code and click « Autoriser »: the CLI only sends requests out to Specster, so no port needs forwarding over SSH. `specster login --no-browser` does the same anywhere, a Mac included, and a browser that fails to open counts as none.
+
+### SPECSTER_TOKEN and SPECSTER_CONFIG_DIR
+
+`SPECSTER_TOKEN`, when set and not empty, comes before the stored token, for CI or a computer that can reach no browser. Create its token in Specster: in « Mon compte », « Jetons personnels », name it after the computer or the job, click « Créer le jeton », and copy it at once: it starts with `specster_` and is shown only this once. Give it as a secret, out of commits and out of conversations with an agent, where it would stay in the transcript: whoever has it can read and change your Projects until you delete it. Refused, it makes every command say « Le jeton de SPECSTER_TOKEN est refusé : retirez-le ou remplacez-le. », which `login` can't help with, since `SPECSTER_TOKEN` comes first. `login` checks the stored token alone, whatever `SPECSTER_TOKEN` says, and `logout` revokes the stored token alone.
+
+`SPECSTER_CONFIG_DIR` names the folder of `tokens.json`, in place of the Keychain or `~/.config/specster/`, as `GH_CONFIG_DIR` does for `gh`: with it, the CLI never runs the Keychain, and `login` ends on that folder, the home folder written `~`, such as « Jeton rangé dans ~/specster-essai/ » for `SPECSTER_CONFIG_DIR=~/specster-essai specster login`. It is what to set when the Keychain refuses the token. `SPECSTER_SECURITY` names another program than `/usr/bin/security` for the Keychain, such as `/usr/bin/false`, to see what `login` does when the Keychain refuses, without touching it.
+
+### From the old setup
+
+Before v0.11.0, you stored the token yourself, in the Keychain's `specster` entry or in plain text in `~/.zshrc`, which set `SPECSTER_TOKEN`. Once the CLI is updated, as « Run it » says, on each computer:
+
+1. **Run `specster login`.** It checks the stored token alone, so it connects while `SPECSTER_TOKEN` is still set.
+2. **Delete the old setup**: the Keychain's entry, if you made one, with `security delete-generic-password -a "$USER" -s specster`, and the line of `~/.zshrc` that sets `SPECSTER_TOKEN`, which `grep -n SPECSTER_TOKEN ~/.zshrc` shows.
+3. **Restart Claude Code, one last time**, from a new terminal: a session keeps the `SPECSTER_TOKEN` it started with, as does the terminal it started from. Then `specster status` says « …, avec le jeton rangé dans le Trousseau. ».
+
+The old token works until you delete it in « Mon compte », « Jetons personnels ».
 
 ## Commands
 
 ```sh
+specster login [address] [--no-browser]    # connects the CLI to Specster through the browser, and stores its token
+specster status [address]                  # says whose account, on which address and with which token the CLI is connected
+specster logout [address]                  # revokes the stored token, then erases it from this computer
 specster init <project URL>                # links this folder to the Project, in .specster.json, and writes « Meta-specs » and « Fiches » in CLAUDE.md
 specster us list                           # prints all the Project's User Stories, archived ones included, by number
 specster us create                         # creates a User Story in the Project, with the standard input as its sentence
@@ -173,7 +199,7 @@ It adds four commands, each run by hand:
 
 `/specster:interview` and `/specster:meta-spec` confirm the Release by reading the sentences of all its User Stories. Given `US-n`, they propose its Release, or to create one.
 
-They need the same `SPECSTER_TOKEN`, and a folder linked with `specster init` for `R-n` and `US-n`.
+They need a folder linked with `specster init` for `R-n` and `US-n`. When the CLI isn't connected, they run `specster login` themselves, in the background, and give you the code to check on its page before you click « Autoriser ».
 
 To grill a Release from its need alone, take three steps, in a new conversation:
 
@@ -188,9 +214,9 @@ A grilling works with what its conversation holds, so the Brief and the grilling
 In each repo whose features you keep in Specster:
 
 1. Run `specster init <project URL>` at its root, and commit `.specster.json`. It holds no secret, and every computer then knows the Project.
-2. Commit the `CLAUDE.md` of that folder too: `init` writes two sections in it, « ### Meta-specs » then « ### Fiches », and prints a line for each one it writes, « La section « Meta-specs » est ajoutée à CLAUDE.md. » and « La section « Fiches » est ajoutée à CLAUDE.md. ». Each is written only when `CLAUDE.md` has no such heading: « Meta-specs » at the end of the file, and « Fiches » right after the « Meta-specs » section, in a `CLAUDE.md` that `init` creates if missing; the rest of the file stays as it is. A section already there is left alone, whatever it says, so `init` can be run again, and it is how a repo linked before v0.8.0 gets what it lacks. For the same reason, a repo linked before keeps the text its sections had then: a rule added since, such as running `us list` before each creation of a User Story or giving a Sheet a Label only when asked, is copied by hand from the sections below.
+2. Commit the `CLAUDE.md` of that folder too: `init` writes two sections in it, « ### Meta-specs » then « ### Fiches », and prints a line for each one it writes, « La section « Meta-specs » est ajoutée à CLAUDE.md. » and « La section « Fiches » est ajoutée à CLAUDE.md. ». Each is written only when `CLAUDE.md` has no such heading: « Meta-specs » at the end of the file, and « Fiches » right after the « Meta-specs » section, in a `CLAUDE.md` that `init` creates if missing; the rest of the file stays as it is. A section already there is left alone, whatever it says, so `init` can be run again, and it is how a repo linked before v0.8.0 gets what it lacks. For the same reason, a repo linked before keeps the text its sections had then: a rule added since, such as running `specster login` when the CLI isn't connected, running `us list` before each creation of a User Story or giving a Sheet a Label only when asked, is copied by hand from the sections below.
 
-   « Meta-specs » has specs and tickets name the meta-spec they come from, `/implement` load it, the agent create User Stories and change their sentences, written as « En tant que …, je veux …, afin de … », in the words of the existing ones, which it reads with `us list` before each creation, naming one that already seems to say the same and creating only once you agree, note Tasks when you ask or once you agree, and link each Task to the User Stories it draws from it, archive a Release once a merge finishes it, with a Note on what delivered it and the « merged » Label on it and on each of its User Stories, and give it its Tag after a successful deployment (the plugin's commands are run by hand, so the agent runs the CLI itself). « Fiches » says when the agent creates a Sheet or changes one, at your request or once you agree to its « Enregistrer une Fiche : … ? », that it asks you before each replacement of a Sheet's HTML, as the old one is lost, when it reads one, that it links on its own the Tasks and the User Stories it draws from one, that it gives a Sheet a Label or takes one from it only when you ask, and that marking a Sheet as a Favorite, archiving and deleting it stay yours. « Meta-specs » reads:
+   « Meta-specs » has specs and tickets name the meta-spec they come from, `/implement` load it, the agent connect the CLI when it isn't, running `specster login` itself in the background and giving you the code to check before you click « Autoriser », or ask you to remove or replace a `SPECSTER_TOKEN` refused, create User Stories and change their sentences, written as « En tant que …, je veux …, afin de … », in the words of the existing ones, which it reads with `us list` before each creation, naming one that already seems to say the same and creating only once you agree, note Tasks when you ask or once you agree, and link each Task to the User Stories it draws from it, archive a Release once a merge finishes it, with a Note on what delivered it and the « merged » Label on it and on each of its User Stories, and give it its Tag after a successful deployment (the plugin's commands are run by hand, so the agent runs the CLI itself). « Fiches » says when the agent creates a Sheet or changes one, at your request or once you agree to its « Enregistrer une Fiche : … ? », that it asks you before each replacement of a Sheet's HTML, as the old one is lost, when it reads one, that it links on its own the Tasks and the User Stories it draws from one, that it gives a Sheet a Label or takes one from it only when you ask, and that marking a Sheet as a Favorite, archiving and deleting it stay yours. « Meta-specs » reads:
 
    ````md
    ### Meta-specs
@@ -198,10 +224,11 @@ In each repo whose features you keep in Specster:
    A meta-spec is the Spec Version, in Specster, that specifies a Release: a functional spec holding a mockup of each screen it changes. This repo is linked to its Specster Project by `.specster.json`, so `R-n` names a Release there and `US-n` a User Story.
 
    - A spec or ticket written from a meta-spec opens with « Meta-spec : R-n vN. Elle fait foi pour l'apparence et le comportement de ce qu'elle change, l'app réelle pour le reste de chaque écran, sauf les exceptions écrites ici ; ses commandes de démonstration ne font pas partie de la feature. », naming the exact version, and lists those exceptions. Each ticket repeats the line, for `/implement` reads the ticket alone.
-   - Before implementing a ticket that cites a meta-spec, load that version: `specster load R-n vN`, or `npx --yes github:sebastienpalanicaouden/specster-cli load R-n vN` where `specster` isn't installed. It needs the User's Personal Token in `SPECSTER_TOKEN`; without it, ask the User to set it rather than working from the ticket alone. Older specs and tickets name a User Story instead, which `specster load US-n vN` still reads, through its Release.
-   - To create a User Story in the linked Project, or change its sentence, run `specster us create`, or `specster us edit US-n`, with the sentence on its standard input, through `npx` and with `SPECSTER_TOKEN` as above. Write the sentence as « En tant que …, je veux …, afin de … », when creating as when editing. When the role, the need or the benefit is missing, ask the User for it rather than inventing it; when all three are there, create or edit without asking for confirmation. Before creating one, run `specster us list` and write the sentence in the words the existing ones use, for the role as for the domain's terms; when one already seems to say the same, name it in one line, such as « US-12 dit déjà : « … ». La créer quand même ? », and create it only once the User says yes.
-   - To read the Tasks of the linked Project, run `specster task list`, or `specster task list --done` for those done, through `npx` and with `SPECSTER_TOKEN` as above. When the User asks you to note a Task, add it at once with `specster task add`, its text on its standard input. When, while working, you notice something to do outside your current work, propose it in one line, such as « Ajouter la tâche : … ? », and add it only once the User says yes: unlike a User Story, a Task is never added unasked. When you create a User Story from a Task, link them on your own with `specster task link T-n US-n`. Change a Task's text, delete it, mark it done or back to do (`specster task edit T-n`, `task delete T-n`, `task done T-n`, `task undone T-n`) only when the User asks, never on your own.
-   - After merging a PR, archive each Release it delivers, without waiting for the deploy tag. The tickets the PR closed name their Releases (« Meta-spec : R-n vN »). A Release is delivered once its spec and every ticket citing « Meta-spec : R-n » are closed (check each citation is R-n itself, not R-n0); while one of them is open, it stays in progress. For each one delivered, add its delivery Note, give « merged » to it and to each of its User Stories, archive it, and tell the User in one line: `specster note add R-n` with the Note on its standard input, then `specster label add R-n merged`, then `specster label add US-n merged` for each of its User Stories, then `specster release archive R-n`, through `npx` and with `SPECSTER_TOKEN` as above. If a Label can't be given, for instance because its list has no « merged » Label, archive it all the same and say so in that line. Give no other Label unless the User asks. The Note, in French, on this model:
+   - Before implementing a ticket that cites a meta-spec, load that version: `specster load R-n vN`, or `npx --yes github:sebastienpalanicaouden/specster-cli load R-n vN` where `specster` isn't installed. When the CLI isn't connected, connect it as below rather than working from the ticket alone. Older specs and tickets name a User Story instead, which `specster load US-n vN` still reads, through its Release.
+   - When the CLI says it isn't connected, « La CLI n'est pas connectée à … : lancez specster login. », or that its stored token was refused, « Le jeton rangé a été refusé (supprimé ou révoqué) : lancez specster login. », run `specster login` yourself, in the background, through `npx` as above. Give the User the code it prints, and ask them to check it on the page it opens in their browser, or at the address it prints when it opens none, then to click « Autoriser ». Once it prints « Connecté en tant que … », run your command again and carry on; should it exit with 1 instead, give the User its message. When the CLI says « Le jeton de SPECSTER_TOKEN est refusé : retirez-le ou remplacez-le. », ask the User to remove `SPECSTER_TOKEN` or replace its token, in their own terminal rather than in the conversation: it comes before the token `specster login` stores.
+   - To create a User Story in the linked Project, or change its sentence, run `specster us create`, or `specster us edit US-n`, with the sentence on its standard input, through `npx` as above. Write the sentence as « En tant que …, je veux …, afin de … », when creating as when editing. When the role, the need or the benefit is missing, ask the User for it rather than inventing it; when all three are there, create or edit without asking for confirmation. Before creating one, run `specster us list` and write the sentence in the words the existing ones use, for the role as for the domain's terms; when one already seems to say the same, name it in one line, such as « US-12 dit déjà : « … ». La créer quand même ? », and create it only once the User says yes.
+   - To read the Tasks of the linked Project, run `specster task list`, or `specster task list --done` for those done, through `npx` as above. When the User asks you to note a Task, add it at once with `specster task add`, its text on its standard input. When, while working, you notice something to do outside your current work, propose it in one line, such as « Ajouter la tâche : … ? », and add it only once the User says yes: unlike a User Story, a Task is never added unasked. When you create a User Story from a Task, link them on your own with `specster task link T-n US-n`. Change a Task's text, delete it, mark it done or back to do (`specster task edit T-n`, `task delete T-n`, `task done T-n`, `task undone T-n`) only when the User asks, never on your own.
+   - After merging a PR, archive each Release it delivers, without waiting for the deploy tag. The tickets the PR closed name their Releases (« Meta-spec : R-n vN »). A Release is delivered once its spec and every ticket citing « Meta-spec : R-n » are closed (check each citation is R-n itself, not R-n0); while one of them is open, it stays in progress. For each one delivered, add its delivery Note, give « merged » to it and to each of its User Stories, archive it, and tell the User in one line: `specster note add R-n` with the Note on its standard input, then `specster label add R-n merged`, then `specster label add US-n merged` for each of its User Stories, then `specster release archive R-n`, through `npx` as above. If a Label can't be given, for instance because its list has no « merged » Label, archive it all the same and say so in that line. Give no other Label unless the User asks. The Note, in French, on this model:
 
      ```
      Livrée par la PR #52 (https://github.com/…/pull/52), squash-mergée en 9b1c2e4, d'après la meta-spec R-3 v2.
@@ -220,7 +247,7 @@ In each repo whose features you keep in Specster:
    ````md
    ### Fiches
 
-   A Sheet, « Fiche » on screen, is a title and an HTML document that the linked Specster Project keeps outside any Release, such as an audit or a research; `F-n` names one there. Its commands are `specster sheet …`, or `npx --yes github:sebastienpalanicaouden/specster-cli sheet …` where `specster` isn't installed, with the User's Personal Token in `SPECSTER_TOKEN`; without it, ask the User to set it.
+   A Sheet, « Fiche » on screen, is a title and an HTML document that the linked Specster Project keeps outside any Release, such as an audit or a research; `F-n` names one there. Its commands are `specster sheet …`, or `npx --yes github:sebastienpalanicaouden/specster-cli sheet …` where `specster` isn't installed; when the CLI says it isn't connected, or that a token was refused, do as « Meta-specs » says.
 
    - Create a Sheet, or change one, when the User asks: `specster sheet create --title "<title>"`, its HTML on the standard input, and `specster sheet edit F-n`, with `--title "<title>"` for a new title, an HTML on the standard input for a new HTML, or both. When, while working, you produce something worth keeping as a Sheet, or see one to change, propose it in one line, such as « Enregistrer une Fiche : … ? », and act only once the User says yes.
    - A Sheet has no versions: `sheet edit` replaces its HTML without a question, and the old one is lost. So before each replacement, even one the User asked for, ask for their agreement in the conversation, recalling that the HTML the Sheet has will be lost. One agreement covers one replacement: ask again for the next. A title changed alone loses nothing, so it takes no such question.
