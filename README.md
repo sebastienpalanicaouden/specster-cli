@@ -17,6 +17,8 @@ npm install --global github:sebastienpalanicaouden/specster-cli
 specster <command>
 ```
 
+`specster --version` then says which version is installed, such as « specster 0.11.0 », read from the `package.json` installed beside `specster.mjs`, and exits with 0. It calls no Specster and reads no token, so it works in any folder, linked or not, and without a network. Only `--version` is known, neither `-v` nor `version`, and anything after it gets the usage on the standard error, with 1, as an unknown command does.
+
 ## Sign in
 
 The CLI, and the plugin through it, act for you with a Personal Token, which `specster login` gets through your browser and stores itself, once on each computer:
@@ -76,6 +78,7 @@ The old token works until you delete it in « Mon compte », « Jetons personnel
 ## Commands
 
 ```sh
+specster --version                         # prints the CLI's version, such as « specster 0.11.0 », without Specster
 specster login [address] [--no-browser]    # connects the CLI to Specster through the browser, and stores its token
 specster status [address]                  # says whose account, on which address and with which token the CLI is connected
 specster logout [address]                  # revokes the stored token, then erases it from this computer

@@ -7,7 +7,7 @@
 // Brief, writes a User Story's Notes, gives it its Labels and archives it, lists and writes the Project's Tasks, marks
 // them done or back to do and links them to its User Stories, and lists, reads, creates and changes the Project's
 // Sheets, gives them their Labels and links them to its Tasks and to its User Stories, through Specster's API, with
-// that token, or the one SPECSTER_TOKEN gives.
+// that token, or the one SPECSTER_TOKEN gives. It also says its version, without Specster.
 
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -36,6 +36,7 @@ const KEYCHAIN_SERVICE = "specster-cli";
 const SECURITY_LINE_MAX = 4094;
 
 const USAGE = `Usage :
+  specster --version                  affiche la version de la CLI
   specster login [adresse] [--no-browser]
                                       connecte la CLI à Specster par le navigateur, qui s'ouvre sur la page de son
                                       code sauf avec --no-browser, et range son jeton
@@ -178,6 +179,7 @@ const TOKEN_REFUSED = {
 class UserError extends Error {}
 
 const COMMANDS = {
+  "--version": printVersion,
   login,
   status,
   logout,
@@ -230,6 +232,15 @@ try {
   if (!(error instanceof UserError)) throw error;
   console.error(error.message);
   process.exitCode = 1;
+}
+
+// Prints « specster X.Y.Z », the version of the package.json beside this file, which npm and pnpm install with it, and
+// which alone holds it. It calls no Specster and reads no token, so it works in any folder and without a network.
+// Anything given after it is refused, as an unknown command is.
+function printVersion(args) {
+  if (args.length > 0) throw new UserError(USAGE);
+  const { version } = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8"));
+  console.log(`specster ${version}`);
 }
 
 // Connects the CLI to Specster through the browser, at the address given, or else of the folder's Project: asks for a
